@@ -4,7 +4,7 @@ stages:
   - deploy
 
 variables:
-  VERSION: "0.3.8"
+  VERSION: "0.3.9"
   AGAMA_ARTIFACTS_LINUX: "linux64.tar.gz"
   AGAMA_ARTIFACTS_MACOS: "osx.tar.gz"
   AGAMA_ARTIFACTS_WINDOWS: "win64.zip"
@@ -18,28 +18,20 @@ build:linux:
   variables:
     DOCKER_DRIVER: overlay2
   stage: build
-  cache:
-    key: ${CI_JOB_NAME}
-    paths:
-    - depends/built
-    - .ccache
-  before_script:
-    - mkdir .ccache  || true
-    - ln -s $PWD/.ccache /root/.ccache
-
   script:
     - "./zcutil/build.sh"
-    - "./zcutil/build-debian-package.sh"
+    ##- "./zcutil/build-debian-package.sh"
     - "./makeReleaseLinux.sh"
     - "cd kmd/linux"
     - "tar -czvf $VERUS_CLI_LINUX_PORTABLE verus-cli"
     - "mv $VERUS_CLI_LINUX_PORTABLE ../.."
     - "mv verus-cli linux64"
     - "tar -czvf $AGAMA_ARTIFACTS_LINUX linux64"
+    - "mv $AGAMA_ARTIFACTS_LINUX ../.."
   artifacts:
     paths:
     - $VERUS_CLI_LINUX_PORTABLE
-    - $VERUS_CLI_DEBIAN
+   ## - $VERUS_CLI_DEBIAN
     - $AGAMA_ARTIFACTS_LINUX
     expire_in: 1 week
 
@@ -85,7 +77,6 @@ build:mac:
     - depends/built
 
   script:
-    - "brew bundle"
     - "./zcutil/build-mac.sh | xcpretty"
     - "./makeReleaseMac.sh"
     - "cd kmd/mac/"
@@ -100,7 +91,7 @@ build:mac:
     - $AGAMA_ARTIFACTS_MACOS
     expire_in: 1 week
 
-code_quality:
+.code_quality:
   image: docker:stable
   variables:
     DOCKER_DRIVER: overlay2
@@ -117,7 +108,7 @@ code_quality:
   artifacts:
     paths: [gl-code-quality-report.json]
 
-sast:
+.sast:
   image: docker:stable
   variables:
     DOCKER_DRIVER: overlay2
@@ -142,18 +133,15 @@ deploy:
   dependencies:
   - build:linux
   - build:windows
-  - build:osx
+  - build:mac
   script:
   - "mkdir $CI_COMMIT_REF_NAME"
   - "cd $CI_COMMIT_REF_NAME"
   - "mkdir Windows && mkdir Linux @&& mkdir MacOS"
   - "cd .."
   - "mv $VERUS_CLI_WINDOWS_PORTABLE $AGAMA_ARTIFACTS_WINDOWS $CI_COMMIT_REF_NAME/Windows"
-  - "mv $VERUS_CLI_LINUX_PORTABLE $VERUS_CLI_DEBIAN $AGAMA_ARTIFACTS_LINUX $CI_COMMIT_REF_NAME/Linux"
+  - "mv $VERUS_CLI_LINUX_PORTABLE $AGAMA_ARTIFACTS_LINUX $CI_COMMIT_REF_NAME/Linux"
   - "mv $AGAMA_ARTIFACTS_MACOS $VERUS_CLI_MACOS_PORTABLE $CI_COMMIT_REF_NAME/MacOS"
   - 'echo "$AUTH_KEY" > AUTH_KEY.json'
   - "gcloud auth activate-service-account --key-file AUTH_KEY.json"
-  - "gsutil cp -m $CI_COMMIT_REF_NAME gs://$BUCKET/GitLab/VerusCoin/$CI_COMMIT_REF_NAME"
-
-
-
+  - "gsutil rsync -r $CI_COMMIT_REF_NAME/ $STAGING/VerusCoin/$CI_COMMIT_REF_NAME/"
