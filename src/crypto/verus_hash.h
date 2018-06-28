@@ -120,7 +120,13 @@ extern void verus_hash_v2(void *result, const void *data, size_t len);
 
 inline bool IsCPUVerusOptimized()
 {
-    return false;
+    unsigned int eax,ebx,ecx,edx;
+
+    if (!__get_cpuid(1,&eax,&ebx,&ecx,&edx))
+    {
+        return false;
+    }
+    return ((ecx & (bit_AVX | bit_AES)) == (bit_AVX | bit_AES));
 };
 
 #endif
