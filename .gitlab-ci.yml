@@ -30,9 +30,6 @@ build:linux:
     - "./zcutil/build.sh"
     ##- "./zcutil/build-debian-package.sh"
     - "./makeReleaseLinux.sh"
-    - "mkdir verus-cli-test"
-    - "cp qa/verus-cli-tester.py"
-    - "cd kmd/linux"
     - "tar -czvf $VERUS_CLI_LINUX_PORTABLE verus-cli"
     - "mv $VERUS_CLI_LINUX_PORTABLE ../.."
     - "mv verus-cli linux64"
@@ -152,7 +149,7 @@ ubuntu:xenial:
   before_script:
     - "./fetch-params.sh"
   script:
-    - "export PATH=$PATH:$(pwd)"
+    - "export PATH=$PATH:$(pwd)/verus-cli"
     - "./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -172,7 +169,7 @@ ubuntu:bionic:
   before_script:
     - "./fetch-params.sh"
   script:
-    - "export PATH=$PATH:$(pwd)"
+    - "export PATH=$PATH:$(pwd)/verus-cli"
     - "./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -188,7 +185,7 @@ osx:sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "export PATH=$PATH:$(pwd)"
+    - "export PATH=$PATH:$(pwd)/verus-cli"
     - "./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
