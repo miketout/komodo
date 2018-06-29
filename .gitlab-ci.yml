@@ -44,7 +44,7 @@ build:linux:
     expire_in: 1 week
 
 
-build:windows:
+.build:windows:
   image: asherd/veruscoin-cross-compiler:latest
   variables:
     DOCKER_DRIVER: overlay2
