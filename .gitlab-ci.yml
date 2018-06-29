@@ -193,7 +193,7 @@ osx:sierra:
   dependencies:
     - build:mac
 
-deploy:
+.deploy:
   stage: deploy
   image: google/cloud-sdk:alpine
   variables:
