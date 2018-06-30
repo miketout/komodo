@@ -30,6 +30,7 @@ build:linux:
     - "./zcutil/build.sh"
     ##- "./zcutil/build-debian-package.sh"
     - "./makeReleaseLinux.sh"
+    - "cd kmd/linux/"
     - "tar -czvf $VERUS_CLI_LINUX_PORTABLE verus-cli"
     - "mv $VERUS_CLI_LINUX_PORTABLE ../.."
     - "mv verus-cli linux64"
