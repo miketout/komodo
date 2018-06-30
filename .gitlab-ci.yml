@@ -148,7 +148,7 @@ ubuntu:xenial:
     paths:
     - ~/.zcash-params
   before_script:
-    - "./fetch-params.sh"
+    - "./zcutil/fetch-params.sh"
   script:
     - "export PATH=$PATH:$(pwd)/verus-cli"
     - "./qa/verus-cli-tests/verus-cli-tester.py"
@@ -168,7 +168,7 @@ ubuntu:bionic:
     paths:
     - ~/.zcash-params
   before_script:
-    - "./fetch-params.sh"
+    - "./zcutil/fetch-params.sh"
   script:
     - "export PATH=$PATH:$(pwd)/verus-cli"
     - "./qa/verus-cli-tests/verus-cli-tester.py"
