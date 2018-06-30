@@ -204,6 +204,7 @@ osx:sierra:
     paths:
     - ~/.zcash-params
   script:
+    - "export PATH=$PATH:$CI_PROJECT_DIR/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -219,6 +220,7 @@ osx:high-sierra:
     paths:
     - ~/.zcash-params
   script:
+    - "export PATH=$PATH:$CI_PROJECT_DIR/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
