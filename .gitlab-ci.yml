@@ -151,7 +151,7 @@ build:mac:
     - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/linux/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
-    paths: [logs.txt]
+    paths: [log.txt]
     expire_in: 1 week
   dependencies:
     - build:linux
@@ -172,7 +172,7 @@ build:mac:
     - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/linux/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
-    paths: [logs.txt]
+    paths: [log.txt]
     expire_in: 1 week
   dependencies:
     - build:linux
@@ -193,7 +193,7 @@ build:mac:
     - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/linux/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
-    paths: [logs.txt]
+    paths: [log.txt]
     expire_in: 1 week
   dependencies:
     - build:linux
@@ -209,7 +209,7 @@ osx:sierra:
     - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/mac/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
-    paths: [logs.txt]
+    paths: [log.txt]
     expire_in: 1 week
   dependencies:
     - build:mac
@@ -225,7 +225,7 @@ osx:high-sierra:
     - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/mac/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
-    paths: [logs.txt]
+    paths: [log.txt]
     expire_in: 1 week
   dependencies:
     - build:mac
