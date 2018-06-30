@@ -149,6 +149,7 @@ build:mac:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "zcutil/fetch-params.sh"
   script:
+    - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/linux/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -169,6 +170,7 @@ build:mac:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "zcutil/fetch-params.sh"
   script:
+    - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/linux/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -189,6 +191,7 @@ build:mac:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "zcutil/fetch-params.sh"
   script:
+    - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/linux/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -204,7 +207,7 @@ osx:sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "export PATH=$PATH:$CI_PROJECT_DIR/verus-cli"
+    - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/osx/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -220,7 +223,7 @@ osx:high-sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "export PATH=$PATH:$CI_PROJECT_DIR/verus-cli"
+    - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/osx/verus-cli"
     - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
