@@ -27,9 +27,9 @@ build:linux:
     - mkdir .ccache  || echo ccache exists
     - ln -s $PWD/.ccache /root/.ccache
   script:
-    - "./zcutil/build.sh -j4"
+    - "zcutil/build.sh -j4"
     ##- "./zcutil/build-debian-package.sh"
-    - "./makeReleaseLinux.sh"
+    - "makeReleaseLinux.sh"
     - "cd kmd/linux/"
     - "tar -czvf $VERUS_CLI_LINUX_PORTABLE verus-cli"
     - "mv $VERUS_CLI_LINUX_PORTABLE ../.."
@@ -41,7 +41,6 @@ build:linux:
     - $VERUS_CLI_LINUX_PORTABLE
    ## - $VERUS_CLI_DEBIAN
     - $AGAMA_ARTIFACTS_LINUX
-    - verus-cli-test
     expire_in: 1 week
 
 
@@ -152,7 +151,6 @@ ubuntu:trusty:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "./zcutil/fetch-params.sh"
   script:
-    - "export PATH=$PATH:$(pwd)/verus-cli"
     - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -173,7 +171,6 @@ ubuntu:xenial:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "./zcutil/fetch-params.sh"
   script:
-    - "export PATH=$PATH:$(pwd)/verus-cli"
     - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -192,9 +189,8 @@ ubuntu:bionic:
     - ~/.zcash-params
   before_script:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
-    - "./zcutil/fetch-params.sh"
+    - "zcutil/fetch-params.sh"
   script:
-    - "export PATH=$PATH:$(pwd)/verus-cli"
     - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -210,7 +206,6 @@ osx:sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "export PATH=$PATH:verus-cli"
     - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -226,7 +221,6 @@ osx:high-sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "export PATH=$PATH:verus-cli"
     - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
