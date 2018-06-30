@@ -4,9 +4,9 @@ from os import environ, path
 
 seconds = 300
 startdaemon = "verusd"
-cli_cmds = "verus getmininginfo", "verus getwalletinfo", "verus stop"
+cli_cmds = ["verus getmininginfo", "verus getwalletinfo", "verus stop"]
 verusd = Popen(startdaemon, shell=True, close_fds=True)
 sleep(seconds)
 for cmd in cli_cmds:  # type: str
     with open(path.join(environ["CI_PROJECT_DIR"], "log.txt"), "a") as log:
-        log.write(check_output(cmd, shell=True))
+        log.write("{0}\n".format(check_output(cmd, shell=True)))

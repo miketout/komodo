@@ -33,14 +33,12 @@ build:linux:
     - "cd kmd/linux/"
     - "tar -czvf $VERUS_CLI_LINUX_PORTABLE verus-cli"
     - "mv $VERUS_CLI_LINUX_PORTABLE ../.."
-    - "mv verus-cli linux64"
-    - "tar -czvf $AGAMA_ARTIFACTS_LINUX linux64"
-    - "mv $AGAMA_ARTIFACTS_LINUX ../.."
   artifacts:
     paths:
     - $VERUS_CLI_LINUX_PORTABLE
    ## - $VERUS_CLI_DEBIAN
     - $AGAMA_ARTIFACTS_LINUX
+    - kmd/linux/verus-cli
     expire_in: 1 week
 
 
