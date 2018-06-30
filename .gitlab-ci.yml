@@ -13,7 +13,7 @@ variables:
   VERUS_CLI_WINDOWS_PORTABLE: "verus-cli-windows-v$VERSION-beta.zip"
   VERUS_CLI_MACOS_PORTABLE: "verus-cli-mac-v$VERSION-beta.tar.gz"
 
-.build:linux:
+build:linux:
   image: asherd/veruscoin-cross-compiler:linux
   variables:
     DOCKER_DRIVER: overlay2
@@ -44,7 +44,7 @@ variables:
     expire_in: 1 week
 
 
-.build:windows:
+build:windows:
   image: asherd/veruscoin-cross-compiler:latest
   variables:
     DOCKER_DRIVER: overlay2
@@ -99,7 +99,7 @@ build:mac:
     expire_in: 1 week
 
 
-.code_quality:
+code_quality:
   image: docker:stable
   variables:
     DOCKER_DRIVER: overlay2
@@ -117,7 +117,7 @@ build:mac:
     paths: [gl-code-quality-report.json]
 
 
-.sast:
+sast:
   image: docker:stable
   variables:
     DOCKER_DRIVER: overlay2
@@ -135,7 +135,7 @@ build:mac:
     paths: [gl-sast-report.json]
 
 
-.ubuntu:trusty:
+ubuntu:trusty:
   image: ubuntu:trusty
   variables:
     DOCKER_DRIVER: overlay2
@@ -156,7 +156,7 @@ build:mac:
   dependencies:
     - build:linux
 
-.ubuntu:xenial:
+ubuntu:xenial:
   image: ubuntu:xenial
   variables:
     DOCKER_DRIVER: overlay2
@@ -177,7 +177,7 @@ build:mac:
   dependencies:
     - build:linux
 
-.ubuntu:bionic:
+ubuntu:bionic:
   image: ubuntu:bionic
   variables:
     DOCKER_DRIVER: overlay2
@@ -230,7 +230,7 @@ osx:high-sierra:
   dependencies:
     - build:mac
 
-.deploy:
+deploy:
   stage: deploy
   image: google/cloud-sdk:alpine
   variables:
