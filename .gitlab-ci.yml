@@ -149,11 +149,11 @@ ubuntu:trusty:
     paths:
     - ~/.zcash-params
   before_script:
-    - "apt update && apt install -y wget g++-multilib libcurl3"
+    - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "./zcutil/fetch-params.sh"
   script:
     - "export PATH=$PATH:$(pwd)/verus-cli"
-    - "./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
@@ -170,11 +170,11 @@ ubuntu:xenial:
     paths:
     - ~/.zcash-params
   before_script:
-    - "apt update && apt install -y wget g++-multilib libcurl3"
+    - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "./zcutil/fetch-params.sh"
   script:
     - "export PATH=$PATH:$(pwd)/verus-cli"
-    - "./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
@@ -191,11 +191,11 @@ ubuntu:bionic:
     paths:
     - ~/.zcash-params
   before_script:
-    - "apt update && apt install -y wget g++-multilib libcurl3"
+    - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "./zcutil/fetch-params.sh"
   script:
     - "export PATH=$PATH:$(pwd)/verus-cli"
-    - "./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
@@ -210,7 +210,7 @@ osx:sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "export PATH=$PATH:$(pwd)/verus-cli"
+    - "export PATH=$PATH:verus-cli"
     - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
@@ -226,7 +226,7 @@ osx:high-sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "export PATH=$PATH:$(pwd)/verus-cli"
+    - "export PATH=$PATH:verus-cli"
     - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
