@@ -92,7 +92,6 @@ build:mac:
     - "cd kmd/mac/"
     - "tar -czvf $VERUS_CLI_MACOS_PORTABLE verus-cli"
     - "mv verus-cli-mac-v$VERSION-beta.tar.gz ../.."
-    - "mv verus-cli ../.."
   artifacts:
     paths:
     - $VERUS_CLI_MACOS_PORTABLE
