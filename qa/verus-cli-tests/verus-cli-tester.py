@@ -1,6 +1,6 @@
 from subprocess import call, Popen, PIPE, check_output
 import time
-cli_path="../../verus-cli/"
+cli_path="verus-cli/"
 sleep = 300
 startdaemon = cli_path + "verusd"
 cli_cmds = "verus getmininginfo", "verus getwalletinfo", "verus stop"
