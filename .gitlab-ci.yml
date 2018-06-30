@@ -29,7 +29,7 @@ build:linux:
   script:
     - "zcutil/build.sh -j4"
     ##- "./zcutil/build-debian-package.sh"
-    - "makeReleaseLinux.sh"
+    - ".makeReleaseLinux.sh"
     - "cd kmd/linux/"
     - "tar -czvf $VERUS_CLI_LINUX_PORTABLE verus-cli"
     - "mv $VERUS_CLI_LINUX_PORTABLE ../.."
@@ -64,7 +64,7 @@ build:linux:
     - ln -s $PWD/.cargo /root/.cargo
   script:
     ## add dos2unix
-    - "./zcutil/build-win.sh"
+    - "zcutil/build-win.sh"
     - "./makeReleaseWindows.sh"
     - "cd kmd/windows/"
     - "zip -r $VERUS_CLI_WINDOWS_PORTABLE verus-cli"
@@ -87,7 +87,7 @@ build:mac:
     paths:
     - depends/built
   script:
-    - "./zcutil/build-mac.sh | xcpretty"
+    - "zcutil/build-mac.sh | xcpretty"
     - "./makeReleaseMac.sh"
     - "cd kmd/mac/"
     - "tar -czvf $VERUS_CLI_MACOS_PORTABLE verus-cli"
@@ -149,9 +149,9 @@ ubuntu:trusty:
     - ~/.zcash-params
   before_script:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
-    - "./zcutil/fetch-params.sh"
+    - "zcutil/fetch-params.sh"
   script:
-    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
@@ -169,9 +169,9 @@ ubuntu:xenial:
     - ~/.zcash-params
   before_script:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
-    - "./zcutil/fetch-params.sh"
+    - "zcutil/fetch-params.sh"
   script:
-    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
@@ -191,7 +191,7 @@ ubuntu:bionic:
     - "apt update && apt install -y wget g++-multilib libcurl3 python"
     - "zcutil/fetch-params.sh"
   script:
-    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
@@ -206,7 +206,7 @@ osx:sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
@@ -221,7 +221,7 @@ osx:high-sierra:
     paths:
     - ~/.zcash-params
   script:
-    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
