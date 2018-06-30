@@ -29,7 +29,7 @@ build:linux:
   script:
     - "zcutil/build.sh -j4"
     ##- "./zcutil/build-debian-package.sh"
-    - ".makeReleaseLinux.sh"
+    - "./makeReleaseLinux.sh"
     - "cd kmd/linux/"
     - "tar -czvf $VERUS_CLI_LINUX_PORTABLE verus-cli"
     - "mv $VERUS_CLI_LINUX_PORTABLE ../.."
