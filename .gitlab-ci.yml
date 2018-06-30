@@ -27,7 +27,7 @@ build:linux:
     - mkdir .ccache  || echo ccache exists
     - ln -s $PWD/.ccache /root/.ccache
   script:
-    - "./zcutil/build.sh"
+    - "./zcutil/build.sh -j4"
     ##- "./zcutil/build-debian-package.sh"
     - "./makeReleaseLinux.sh"
     - "cd kmd/linux/"
@@ -138,6 +138,28 @@ sast:
   artifacts:
     paths: [gl-sast-report.json]
 
+
+ubuntu:trusty:
+  image: ubuntu:trusty
+  variables:
+    DOCKER_DRIVER: overlay2
+  stage: test
+  cache:
+    key: ${CI_JOB_NAME}
+    paths:
+    - ~/.zcash-params
+  before_script:
+    - "apt update && apt install -y wget g++-multilib libcurl3"
+    - "./zcutil/fetch-params.sh"
+  script:
+    - "export PATH=$PATH:$(pwd)/verus-cli"
+    - "./qa/verus-cli-tests/verus-cli-tester.py"
+  artifacts:
+    paths: [qa/verus-cli-tests/logs.txt]
+    expire_in: 1 week
+  dependencies:
+    - build:linux
+
 ubuntu:xenial:
   image: ubuntu:xenial
   variables:
@@ -148,6 +170,7 @@ ubuntu:xenial:
     paths:
     - ~/.zcash-params
   before_script:
+    - "apt update && apt install -y wget g++-multilib libcurl3"
     - "./zcutil/fetch-params.sh"
   script:
     - "export PATH=$PATH:$(pwd)/verus-cli"
@@ -168,6 +191,7 @@ ubuntu:bionic:
     paths:
     - ~/.zcash-params
   before_script:
+    - "apt update && apt install -y wget g++-multilib libcurl3"
     - "./zcutil/fetch-params.sh"
   script:
     - "export PATH=$PATH:$(pwd)/verus-cli"
@@ -187,7 +211,23 @@ osx:sierra:
     - ~/.zcash-params
   script:
     - "export PATH=$PATH:$(pwd)/verus-cli"
-    - "./qa/verus-cli-tests/verus-cli-tester.py"
+    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
+  artifacts:
+    paths: [qa/verus-cli-tests/logs.txt]
+    expire_in: 1 week
+  dependencies:
+    - build:mac
+
+osx:high-sierra:
+  stage: test
+  tags: ["high sierra"]
+  cache:
+    key: ${CI_JOB_NAME}
+    paths:
+    - ~/.zcash-params
+  script:
+    - "export PATH=$PATH:$(pwd)/verus-cli"
+    - "python ./qa/verus-cli-tests/verus-cli-tester.py"
   artifacts:
     paths: [qa/verus-cli-tests/logs.txt]
     expire_in: 1 week
