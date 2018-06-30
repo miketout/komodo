@@ -132,28 +132,6 @@ sast:
   artifacts:
     paths: [gl-sast-report.json]
 
-
-ubuntu:trusty:
-  image: ubuntu:trusty
-  variables:
-    DOCKER_DRIVER: overlay2
-  stage: test
-  cache:
-    key: ${CI_JOB_NAME}
-    paths:
-    - ~/.zcash-params
-  before_script:
-    - "apt update && apt install -y wget g++-multilib libcurl3 python"
-    - "zcutil/fetch-params.sh"
-  script:
-    - "export PATH=$PATH:$CI_PROJECT_DIR/kmd/linux/verus-cli"
-    - "python qa/verus-cli-tests/verus-cli-tester.py"
-  artifacts:
-    paths: [log.txt]
-    expire_in: 1 week
-  dependencies:
-    - build:linux
-
 ubuntu:xenial:
   image: ubuntu:xenial
   variables:
