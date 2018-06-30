@@ -1,12 +1,14 @@
 from subprocess import call, Popen, PIPE, check_output
-import time
-cli_path="verus-cli/"
-sleep = 300
-startdaemon = cli_path + "verusd"
+from time import sleep
+from os import environ, path
+
+cli_path = path.join(environ["CI_PROJECT_DIR"], "verus-cli")
+seconds = 300
+startdaemon = path.join(cli_path, "verusd")
 cli_cmds = "verus getmininginfo", "verus getwalletinfo", "verus stop"
 verusd = Popen(startdaemon, shell=True, close_fds=True)
-time.sleep(sleep)
+sleep(seconds)
 for cmd in cli_cmds:  # type: str
-    cmd = cli_path + cmd
-    with open ("log.txt", "a") as g:
-        g.write(check_output(cmd, shell=True))
+    path.join(cli_path, cmd)
+    with open("log.txt", "a") as log:
+        log.write(check_output(cmd, shell=True))
