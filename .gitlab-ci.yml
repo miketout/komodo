@@ -3,7 +3,7 @@ stages:
   - test
   - deploy
 
-variables: 
+variables:
   VERSION: 0.3.9
   AGAMA_ARTIFACTS_LINUX: linux64.tar.gz
   AGAMA_ARTIFACTS_MACOS: osx.tar.gz
@@ -160,7 +160,6 @@ ubuntu:bionic:
   image: ubuntu:bionic
   variables:
     DOCKER_DRIVER: overlay2
-    PATH: $PATH:$CI_PROJECT_DIR/verus-cli
   stage: test
   cache:
     key: ${CI_JOB_NAME}
@@ -182,8 +181,6 @@ ubuntu:bionic:
 osx:sierra:
   stage: test
   tags: ["sierra"]
-  variables:
-    PATH: $PATH:$CI_PROJECT_DIR/verus-cli
   cache:
     key: ${CI_JOB_NAME}
     paths:
@@ -202,8 +199,6 @@ osx:sierra:
 osx:high-sierra:
   stage: test
   tags: ["high sierra"]
-  variables:
-    PATH: $PATH:$CI_PROJECT_DIR/verus-cli
   cache:
     key: ${CI_JOB_NAME}
     paths:
