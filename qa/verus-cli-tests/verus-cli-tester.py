@@ -1,8 +1,8 @@
-from subprocess import Popen, check_output, call
+from subprocess import Popen, check_output
 from time import sleep
 from os import environ, path
 
-call("fetch-params", shell=True)
+Popen("fetch-params", shell=True)
 seconds = 600
 cli_cmds = ["verus getblockchaininfo", "verus getmininginfo", "verus getwalletinfo", "verus stop"]
 verusd = Popen("verusd", shell=True, close_fds=True)
