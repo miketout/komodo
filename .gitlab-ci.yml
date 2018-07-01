@@ -27,7 +27,7 @@ build:linux:
     - "dos2unix kmd/linux/verus-cli/README.txt"
     - "tar -C kmd/linux/ -czvf $VERUS_CLI_LINUX_PORTABLE verus-cli ./"
     - "mv kmd/linux/verus-cli kmd/linux/linux64"
-    - "tar -C kmd/linux/ -czvf $AGAMA_ARTIFACTS_LINUX verus-cli ./"
+    - "tar -C kmd/linux/ -czvf $AGAMA_ARTIFACTS_LINUX linux64 ./"
   after_script:
     - mv /root/.ccache ./ || true
   cache:
@@ -88,7 +88,7 @@ build:mac:
     - "dos2unix kmd/mac/verus-cli/README.txt"
     - "tar -C kmd/mac/ -czvf $VERUS_CLI_MACOS_PORTABLE verus-cli ./"
     - "mv kmd/mac/verus-cli kmd/mac/osx"
-    - "tar -C kmd/mac/ -czvf $AGAMA_ARTIFACTS_MACOS verus-cli ./"
+    - "tar -C kmd/mac/ -czvf $AGAMA_ARTIFACTS_MACOS osx ./"
   artifacts:
     paths:
     - $VERUS_CLI_MACOS_PORTABLE
