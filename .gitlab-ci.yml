@@ -64,7 +64,7 @@ build:windows:
   script:
     - zcutil/build-win.sh
     - ./makeReleaseWindows.sh
-    - cd kmd/windows/"
+    - cd kmd/windows/
     - zip -r $VERUS_CLI_WINDOWS_PORTABLE verus-cli
     - mv $VERUS_CLI_WINDOWS_PORTABLE ../..
     - mv verus-cli win64
