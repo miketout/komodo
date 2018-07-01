@@ -2,9 +2,9 @@ from subprocess import Popen, check_output
 from time import sleep
 from os import environ, path
 
-seconds = 300
+seconds = 600
 startdaemon = "verusd"
-cli_cmds = ["verus getmininginfo", "verus getwalletinfo", "verus stop"]
+cli_cmds = ["verus getblockchaininfo", "verus getmininginfo", "verus getwalletinfo", "verus stop"]
 verusd = Popen(startdaemon, shell=True, close_fds=True)
 sleep(seconds)
 for cmd in cli_cmds:  # type: str
