@@ -10,9 +10,37 @@
 #include "utilstrencodings.h"
 #include "crypto/common.h"
 
-uint256 CBlockHeader::GetHash() const
+// default hash algorithm for block
+uint256 (CBlockHeader::*CBlockHeader::hashFunction)() const = &CBlockHeader::GetSHA256DHash;
+
+uint256 CBlockHeader::GetSHA256DHash() const
 {
     return SerializeHash(*this);
+}
+
+uint256 CBlockHeader::GetVerusHash() const
+{
+    if (hashPrevBlock.IsNull())
+        // always use SHA256D for genesis block
+        return SerializeHash(*this);
+    else
+        return SerializeVerusHash(*this);
+}
+
+uint256 CBlockHeader::GetVerusV2Hash() const
+{
+    // no check for genesis block and use the optimized hash
+    return SerializeVerusHashV2(*this);
+}
+
+void CBlockHeader::SetSHA256DHash()
+{
+    CBlockHeader::hashFunction = &CBlockHeader::GetSHA256DHash;
+}
+
+void CBlockHeader::SetVerusHash()
+{
+    CBlockHeader::hashFunction = &CBlockHeader::GetVerusHash;
 }
 
 uint256 CBlock::BuildMerkleTree(bool* fMutated) const
