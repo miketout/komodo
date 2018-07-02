@@ -180,7 +180,7 @@ ubuntu:bionic:
 
 osx:sierra:
   stage: test
-  tags: ["sierra"]
+  tags: ["Sierra"]
   script:
     - tar -xzvf $VERUS_CLI_MACOS_PORTABLE
     - export PATH=$PATH:$CI_PROJECT_DIR/verus-cli
@@ -194,7 +194,7 @@ osx:sierra:
 
 osx:high-sierra:
   stage: test
-  tags: ["high sierra"]
+  tags: ["High Sierra"]
   script:
     - tar -xzvf $VERUS_CLI_MACOS_PORTABLE
     - export PATH=$PATH:$CI_PROJECT_DIR/verus-cli
