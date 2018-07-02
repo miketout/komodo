@@ -78,7 +78,7 @@ build:windows:
 
 build:mac:
   stage: build
-  tags: ["osx"]
+  tags: ["High Sierra"]
   cache:
     key: ${CI_JOB_NAME}
     paths:
@@ -181,10 +181,6 @@ ubuntu:bionic:
 osx:sierra:
   stage: test
   tags: ["sierra"]
-  cache:
-    key: ${CI_JOB_NAME}
-    paths:
-    - ~/.zcash-params
   script:
     - tar -xzvf $VERUS_CLI_MACOS_PORTABLE
     - export PATH=$PATH:$CI_PROJECT_DIR/verus-cli
@@ -199,10 +195,6 @@ osx:sierra:
 osx:high-sierra:
   stage: test
   tags: ["high sierra"]
-  cache:
-    key: ${CI_JOB_NAME}
-    paths:
-    - ~/.zcash-params
   script:
     - tar -xzvf $VERUS_CLI_MACOS_PORTABLE
     - export PATH=$PATH:$CI_PROJECT_DIR/verus-cli
