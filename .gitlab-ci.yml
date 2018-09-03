@@ -26,7 +26,7 @@ build:linux:
   - chmod +x kmd/linux/verus-cli/verus
   - chmod +x kmd/linux/verus-cli/verusd
   - chmod +x kmd/linux/verus-cli/fetch-params
-  - chmod +x dos2unix kmd/linux/verus-cli/README.txt
+  - dos2unix kmd/linux/verus-cli/README.txt
   - tar -C kmd/linux/ -czvf $VERUS_CLI_LINUX verus-cli ./
   after_script:
   - mv /root/.ccache ./ || true
