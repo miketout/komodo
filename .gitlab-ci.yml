@@ -22,10 +22,10 @@ build:linux:
   - zcutil/build.sh -j4
   - cp src/komodod src/komodo-cli kmd/linux/verus-cli
   - chmod +x kmd/linux/verus-cli/komodod
-    kmd/linux/verus-cli/komodo-cli
-    kmd/linux/verus-cli/verus
-    kmd/linux/verus-cli/verusd
-    kmd/linux/verus-cli/fetch-params
+  - kmd/linux/verus-cli/komodo-cli
+  - kmd/linux/verus-cli/verus
+  - kmd/linux/verus-cli/verusd
+  - kmd/linux/verus-cli/fetch-params
   - dos2unix kmd/linux/verus-cli/README.txt
   - tar -C kmd/linux/ -czvf $VERUS_CLI_LINUX verus-cli ./
   after_script:
