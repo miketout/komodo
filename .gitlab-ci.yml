@@ -272,7 +272,7 @@ deploy:
   - gsutil cp -r Windows Linux MacOS $STAGING/VerusCoin/$CI_COMMIT_REF_NAME/
   - curl -X POST
       -F token="$CI_JOB_TOKEN"
-      -F ref=master
+      -F ref=dev
       -F variables\[UPSTREAM_CLI_BRANCH\]="$CI_COMMIT_REF_NAME"
       -F variables\[VERUS_CLI_LINUX\]="$VERUS_CLI_LINUX"
       -F variables\[VERUS_CLI_WINDOWS\]="$VERUS_CLI_WINDOWS"
