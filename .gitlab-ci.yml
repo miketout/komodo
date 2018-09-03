@@ -87,7 +87,7 @@ build:mac:
     expire_in: 1 week
 
 
-code_quality:
+.code_quality:
   image: docker:stable
   variables:
     DOCKER_DRIVER: overlay2
@@ -105,7 +105,7 @@ code_quality:
     paths: [gl-code-quality-report.json]
 
 
-sast:
+.sast:
   image: docker:stable
   variables:
     DOCKER_DRIVER: overlay2
@@ -124,7 +124,7 @@ sast:
 
 
 
-license_management:
+.license_management:
   image: docker:stable
   variables:
     DOCKER_DRIVER: overlay2
@@ -140,7 +140,7 @@ license_management:
     paths: [gl-license-management-report.json]
 
 
-ubuntu:xenial:
+.ubuntu:xenial:
   image: ubuntu:xenial
   variables:
     DOCKER_DRIVER: overlay2
@@ -165,7 +165,7 @@ ubuntu:xenial:
   - build:linux
 
 
-ubuntu:bionic:
+.ubuntu:bionic:
   image: ubuntu:bionic
   variables:
     DOCKER_DRIVER: overlay2
@@ -267,7 +267,7 @@ deploy:
     mv $VERUS_CLI_LINUX Linux &&
     mv $VERUS_CLI_MACOS MacOS
   - echo "$AUTH_KEY" > AUTH_KEY.json &&
-    cloud auth activate-service-account
+    gcloud auth activate-service-account
     --key-file AUTH_KEY.json
   - gsutil cp -r Windows Linux MacOS $STAGING/VerusCoin/$CI_COMMIT_REF_NAME/
   - curl -X POST
