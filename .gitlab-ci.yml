@@ -90,7 +90,7 @@ build:windows:
     expire_in: 1 week
 
 
-.build:mac:
+build:mac:
   stage: build
   tags: ["High Sierra"]
   cache:
