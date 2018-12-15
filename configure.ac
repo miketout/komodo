@@ -15,7 +15,7 @@ AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([build-aux/m4])
 
 BITCOIN_DAEMON_NAME=verusd
-BITCOIN_CLI_NAME=verus
+BITCOIN_CLI_NAME=verus-cli
 BITCOIN_TX_NAME=verus-tx
 
 dnl Unless the user specified ARFLAGS, force it to be cr

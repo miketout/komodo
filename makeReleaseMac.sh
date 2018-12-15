@@ -3,7 +3,8 @@
 KMD_DIR=verus-cli
 mkdir ${KMD_DIR}
 
-cp src/verus \
+cp src/verus-cli \
+   src/fiat/verus
    src/verusd \
    doc/man/verus-cli/mac/README.txt \
    zcutil/fetch-params.sh \
@@ -12,6 +13,7 @@ cp src/verus \
 mv verus-cli/fetch-params.sh verus-cli/fetch-params
 chmod +x ${KMD_DIR}/fetch-params
 chmod +x ${KMD_DIR}/verus
+chmod +x ${KMD_DIR}/verus-cli
 chmod +x ${KMD_DIR}/verusd
 chmod +x ${KMD_DIR}/upgrade-agama.sh
 
