@@ -48,3 +48,5 @@ CXXFLAGS='-arch x86_64 -I/usr/local/Cellar/gcc\@6/6.4.0_2/include/c++/6.4.0/ -I$
 ./configure --prefix="${PREFIX}" --with-gui=no "$HARDENING_ARG" "$LCOV_ARG"
 
 make "$@" V=1 NO_GTEST=1 STATIC=1
+mv src/komodod src/verusd
+

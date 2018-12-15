@@ -1,6 +1,6 @@
 VerusCoin Command Line Tools v0.5.0
 Contents:
-komodod.exe - VerusCoin's enhanced Komodo daemon
+verusd.exe - VerusCoin's enhanced Komodo daemon
 komodo-cli.exe - VerusCoin's Komodo command line utility
 verus.bat - wrapper for komodo-cli that applies the command to the VRSC coin
 verusd.bat - wrapper for komodod that sets the VerusCoin parameters to defaults properly
