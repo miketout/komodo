@@ -83,6 +83,7 @@ build:windows:
   script:
   - zcutil/build-win.sh -j$(nproc)
   - mkdir verus-cli
+  - mv src/komodod.exe src/verusd.exe
   - cp src/verusd.exe
       src/komodo-cli.exe
       src/komodo-tx.exe

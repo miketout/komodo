@@ -17,4 +17,3 @@ sed -i 's/-lboost_system-mt /-lboost_system-mt-s /' configure
 cd src/
 CC="${CC} -g " CXX="${CXX} -g " make V=1  komodod.exe komodo-cli.exe komodo-tx.exe
 
-mv src/komodod.exe src/verusd.exe
