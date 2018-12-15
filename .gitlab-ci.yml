@@ -40,7 +40,6 @@ build:linux:
   - cp src/verusd
       src/komodo-cli
       src/fiat/verus
-      src/verusd.sh
       doc/man/verus-cli/linux/README.txt
       zcutil/fetch-params.sh
       zcutil/upgrade-agama.sh
@@ -48,7 +47,6 @@ build:linux:
   - mv verus-cli/fetch-params.sh verus-cli/fetch-params
   - chmod +x verus-cli/verusd
   - chmod +x verus-cli/komodo-cli
-  - chmod +x verus-cli/verus.sh
   - chmod +x verus-cli/verusd
   - chmod +x verus-cli/fetch-params
   - chmod +x verus-cli/upgrade-agama.sh
