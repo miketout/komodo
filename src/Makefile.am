@@ -182,8 +182,10 @@ BITCOIN_CORE_H = \
   consensus/validation.h \
   core_io.h \
   core_memusage.h \
+  crypto/clhash.h \
   crypto/haraka.h \
   crypto/haraka_portable.h \
+  crypto/verus_clhash.h \
   crypto/verus_hash.h \
   deprecation.h \
   hash.h \
@@ -212,6 +214,7 @@ BITCOIN_CORE_H = \
   primitives/block.h \
   primitives/transaction.h \
   primitives/nonce.h \
+  primitives/solutiondata.h \
   protocol.h \
   pubkey.h \
   random.h \
@@ -314,8 +317,10 @@ libbitcoin_server_a_SOURCES = \
   cheatcatcher.cpp \
   checkpoints.cpp \
   crosschain.cpp \
+  crypto/clhash.h \
   crypto/haraka.h \
   crypto/haraka_portable.h \
+  crypto/verus_clhash.h \
   crypto/verus_hash.h \
   crypto/verus_hash.cpp \
   deprecation.cpp \
@@ -334,6 +339,7 @@ libbitcoin_server_a_SOURCES = \
   paymentdisclosuredb.cpp \
   policy/fees.cpp \
   pow.cpp \
+  primitives/solutiondata.cpp \
   rest.cpp \
   rpc/blockchain.cpp \
   rpc/crosschain.cpp \
@@ -436,11 +442,15 @@ crypto_libbitcoin_crypto_a_SOURCES += \
 endif
 
 # Verus hash specific library - optimized
-crypto_libverus_crypto_a_CPPFLAGS = -O3 -Wint-conversion -march=x86-64 -msse4 -msse4.1 -msse4.2 -mssse3 -mavx -maes -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS)
-crypto_libverus_crypto_a_CXXFLAGS = -O3 -Wint-conversion -march=x86-64 -msse4 -msse4.1 -msse4.2 -mssse3 -mavx -maes -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CXXFLAGS)
+crypto_libverus_crypto_a_CPPFLAGS = -O3 -Wint-conversion -march=x86-64 -mpclmul -msse4 -msse4.1 -msse4.2 -mssse3 -mavx -maes -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS)
+crypto_libverus_crypto_a_CXXFLAGS = -O3 -Wint-conversion -march=x86-64 -mpclmul -msse4 -msse4.1 -msse4.2 -mssse3 -mavx -maes -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CXXFLAGS)
 crypto_libverus_crypto_a_SOURCES = \
+  crypto/clhash.h \
+  crypto/clhash.c \
   crypto/haraka.h \
-  crypto/haraka.c
+  crypto/haraka.c \
+  crypto/verus_clhash.h \
+  crypto/verus_clhash.cpp
 
 # Verus hash specific library - portable
 crypto_libverus_portable_crypto_a_CPPFLAGS = -O3 -Wint-conversion -march=x86-64 -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS)
@@ -463,8 +473,10 @@ libbitcoin_common_a_SOURCES = \
   consensus/upgrades.cpp \
   core_read.cpp \
   core_write.cpp \
+  crypto/clhash.h \
   crypto/haraka.h \
   crypto/haraka_portable.h \
+  crypto/verus_clhash.h \
   crypto/verus_hash.h \
   crypto/verus_hash.cpp \
   hash.cpp \
@@ -477,6 +489,7 @@ libbitcoin_common_a_SOURCES = \
   primitives/block.cpp \
   primitives/transaction.cpp \
   primitives/nonce.cpp \
+  primitives/solutiondata.cpp \
   protocol.cpp \
   pubkey.cpp \
   scheduler.cpp \

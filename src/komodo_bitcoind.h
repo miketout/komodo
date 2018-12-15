@@ -1477,8 +1477,6 @@ bool verusCheckPOSBlock(int32_t slowflag, CBlock *pblock, int32_t height)
     if (!pblock->IsVerusPOSBlock())
     {
         printf("%s, height %d not POS block\n", pblock->nNonce.GetHex().c_str(), height);
-        //pblock->nNonce.SetPOSTarget(pblock->nNonce.GetPOSTarget());
-        //printf("%s after setting POS target\n", pblock->nNonce.GetHex().c_str());
         return false;
     }
 
@@ -1602,7 +1600,7 @@ bool verusCheckPOSBlock(int32_t slowflag, CBlock *pblock, int32_t height)
                                 //if (nonce != pblock->nNonce)
                                 //    printf("Mismatched nNonce: %s\nblkHash: %s, height: %d\n", nonce.GetHex().c_str(), pblock->GetHash().GetHex().c_str(), height);
 
-                                if (CPOSNonce::NewNonceActive(height) && !nonce.CheckPOSEntropy(pastHash, txid, voutNum))
+                                if (CPOSNonce::NewNonceActive(height) && !nonce.CheckPOSEntropy(pastHash, txid, voutNum, pblock->nVersion))
                                 {
                                     fprintf(stderr,"ERROR: invalid PoS block %s - nonce entropy corrupted or forged\n",blkHash.ToString().c_str());
                                     nonceOK = false;

@@ -1,10 +1,6 @@
-## VerusCoin version 0.4.0h
+## VerusCoin version 0.5.0 with VerusHash 2.0
 
-VerusCoin is a new, mineable and stakeable cryptocurrency. 
-It is a live fork of Komodo that retains its Zcash lineage and improves it.
-VerusCoin will leverage the Komodo platform and dPoW notarization for enhanced security 
-and cross-chain interoperability. We have added a variation of a zawy12, lwma difficulty algorithm, a new CPU-optimized hash algorithm and a new algorithm for fair proof of stake.
-We describe these changes and vision going forward in [our Phase I white paper](http://185.25.51.16/papers/VerusPhaseI.pdf) and [our Vision](http://185.25.51.16/papers/VerusVision.pdf).
+VerusCoin is a new, mineable and stakeable cryptocurrency. It is a live fork of Komodo that retains its Zcash lineage and improves it. VerusCoin will leverage the Komodo platform and dPoW notarization for enhanced security and cross-chain interoperability. We have added a variation of a zawy12, lwma difficulty algorithm, a new CPU-optimized hash algorithm and a new algorithm for fair proof of stake. We describe these changes and vision going forward in a [our Phase I white paper](http://185.25.51.16/papers/VerusPhaseI.pdf) and [our Vision](http://185.25.51.16/papers/VerusVision.pdf).
 - [VerusCoin web site https://veruscoin.io/ Wallets and CLI tools](https://veruscoin.io/)
 - [VerusCoin Explorer](https://explorer.veruscoin.io/)
 
@@ -94,8 +90,8 @@ git clone https://github.com/VerusCoin/VerusCoin
 cd VerusCoin
 #you might want to: git checkout <branch>; git pull
 ./zcutil/fetch-params.sh
-# -j$(nproc) = using all threads for the compilation - replace $(nproc) with number of threads you want to use
-./zcutil/build.sh -j$(nproc)
+# -j8 = using 8 threads for the compilation - replace 8 with number of threads you want to use
+./zcutil/build.sh -j8
 #This can take some time.
 ```
 

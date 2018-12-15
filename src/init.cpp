@@ -1165,7 +1165,15 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         // initialize VerusHash
         CVerusHash::init();
         CVerusHashV2::init();
-        CBlockHeader::SetVerusHash();
+        CBlockHeader::SetVerusV2Hash();
+        if (strcmp(ASSETCHAINS_SYMBOL,"VRSC") == 0)
+        {
+            CConstVerusSolutionVector::activationHeight.SetActivationHeight(1, 303000);
+        }
+        else
+        {
+            CConstVerusSolutionVector::activationHeight.SetActivationHeight(1, 160);
+        }
     }
 
     // Sanity check

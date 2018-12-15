@@ -8,6 +8,7 @@
 #include "serialize.h"
 #include "uint256.h"
 #include "arith_uint256.h"
+#include "hash.h"
 
 
 /** For POS blocks, the nNonce of a block header holds the entropy source for the POS contest
@@ -16,6 +17,9 @@
 class CPOSNonce : public uint256
 {
 public:
+    static const int32_t VERUS_V1=4;
+    static const int32_t VERUS_V2=0x00010004;
+
     static bool NewPOSActive(int32_t height);
     static bool NewNonceActive(int32_t height);
 
@@ -38,27 +42,44 @@ public:
         return nBits;
     }
 
-    bool IsPOSNonce() const
+    bool IsPOSNonce(uint32_t version=VERUS_V1) const
     {
         arith_uint256 arNonce = UintToArith256(*this);
         arith_uint256 tmpNonce = ((arNonce << 128) >> 128);
-        CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
-        hashWriter << ArithToUint256(tmpNonce);
-        return (*this == ArithToUint256(UintToArith256(hashWriter.GetHash()) << 128 | tmpNonce));
+        if (version == VERUS_V2)
+        {
+            CVerusHashV2Writer hashWriter = CVerusHashV2Writer(SER_GETHASH, PROTOCOL_VERSION);
+            hashWriter << ArithToUint256(tmpNonce);
+            return (*this == ArithToUint256(UintToArith256(hashWriter.GetHash()) << 128 | tmpNonce));
+        }
+        else
+        {
+            CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+            hashWriter << ArithToUint256(tmpNonce);
+            return (*this == ArithToUint256(UintToArith256(hashWriter.GetHash()) << 128 | tmpNonce));
+        }
     }
 
-    void SetPOSTarget(uint32_t nBits)
+    void SetPOSTarget(uint32_t nBits, uint32_t version=VERUS_V1)
     {
-        CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
-
         arith_uint256 arNonce = (UintToArith256(*this) & entropyMask) | nBits;
-        hashWriter << ArithToUint256(arNonce);
 
-        (uint256 &)(*this) = ArithToUint256(UintToArith256(hashWriter.GetHash()) << 128 | arNonce);
+        if (version == VERUS_V2)
+        {
+            CVerusHashV2Writer hashWriter = CVerusHashV2Writer(SER_GETHASH, PROTOCOL_VERSION);
+            hashWriter << ArithToUint256(arNonce);
+            (uint256 &)(*this) = ArithToUint256(UintToArith256(hashWriter.GetHash()) << 128 | arNonce);
+        }
+        else
+        {
+            CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+            hashWriter << ArithToUint256(arNonce);
+            (uint256 &)(*this) = ArithToUint256(UintToArith256(hashWriter.GetHash()) << 128 | arNonce);
+        }
     }
 
-    void SetPOSEntropy(const uint256 &pastHash, uint256 txid, int32_t voutNum);
-    bool CheckPOSEntropy(const uint256 &pastHash, uint256 txid, int32_t voutNum);
+    void SetPOSEntropy(const uint256 &pastHash, uint256 txid, int32_t voutNum, uint32_t version=VERUS_V1);
+    bool CheckPOSEntropy(const uint256 &pastHash, uint256 txid, int32_t voutNum, uint32_t version=VERUS_V1);
 };
 
 #endif // BITCOIN_PRIMITIVES_NONCE_H

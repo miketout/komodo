@@ -27,45 +27,91 @@ bool CPOSNonce::NewNonceActive(int32_t height)
         return true;
 }
 
-void CPOSNonce::SetPOSEntropy(const uint256 &pastHash, uint256 txid, int32_t voutNum)
+void CPOSNonce::SetPOSEntropy(const uint256 &pastHash, uint256 txid, int32_t voutNum, uint32_t version)
 {
-    // get low 96 bits of past hash and put it in top 96 bits of low 128 bits of nonce
-    CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+    if (version == VERUS_V2)
+    {
+        // get low 96 bits of past hash and put it in top 96 bits of low 128 bits of nonce
+        CVerusHashV2Writer hashWriter = CVerusHashV2Writer(SER_GETHASH, PROTOCOL_VERSION);
 
-    // first hash the pastHash, txid, and voutNum, to create a combined 96 bits, which will be used in the nonce
-    hashWriter << pastHash;
-    hashWriter << txid;
-    hashWriter << voutNum;
+        // first hash the pastHash, txid, and voutNum, to create a combined 96 bits, which will be used in the nonce
+        hashWriter << pastHash;
+        hashWriter << txid;
+        hashWriter << voutNum;
 
-    arith_uint256 arNonce = (UintToArith256(*this) & posDiffMask) |
-        (UintToArith256(hashWriter.GetHash()) & entropyMask);
+        arith_uint256 arNonce = (UintToArith256(*this) & posDiffMask) |
+            (UintToArith256(hashWriter.GetHash()) & entropyMask);
 
-    // printf("before %s\n", ArithToUint256(arNonce).GetHex().c_str());
+        // printf("before %s\n", ArithToUint256(arNonce).GetHex().c_str());
 
-    hashWriter.Reset();
-    hashWriter << ArithToUint256(arNonce);
+        hashWriter.Reset();
+        hashWriter << ArithToUint256(arNonce);
 
-    *this = CPOSNonce(ArithToUint256((UintToArith256(hashWriter.GetHash()) << 128) | arNonce));
+        *this = CPOSNonce(ArithToUint256((UintToArith256(hashWriter.GetHash()) << 128) | arNonce));
 
-    // printf("after  %s\n", this->GetHex().c_str());
+        // printf("after  %s\n", this->GetHex().c_str());
+    }
+    else
+    {
+        // get low 96 bits of past hash and put it in top 96 bits of low 128 bits of nonce
+        CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+
+        // first hash the pastHash, txid, and voutNum, to create a combined 96 bits, which will be used in the nonce
+        hashWriter << pastHash;
+        hashWriter << txid;
+        hashWriter << voutNum;
+
+        arith_uint256 arNonce = (UintToArith256(*this) & posDiffMask) |
+            (UintToArith256(hashWriter.GetHash()) & entropyMask);
+
+        // printf("before %s\n", ArithToUint256(arNonce).GetHex().c_str());
+
+        hashWriter.Reset();
+        hashWriter << ArithToUint256(arNonce);
+
+        *this = CPOSNonce(ArithToUint256((UintToArith256(hashWriter.GetHash()) << 128) | arNonce));
+
+        // printf("after  %s\n", this->GetHex().c_str());
+    }
 }
 
-bool CPOSNonce::CheckPOSEntropy(const uint256 &pastHash, uint256 txid, int32_t voutNum)
+bool CPOSNonce::CheckPOSEntropy(const uint256 &pastHash, uint256 txid, int32_t voutNum, uint32_t version)
 {
-    // get low 96 bits of past hash and put it in top 96 bits of low 128 bits of nonce
-    CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+    if (version == VERUS_V2)
+    {
+        // get low 96 bits of past hash and put it in top 96 bits of low 128 bits of nonce
+        CVerusHashV2Writer hashWriter = CVerusHashV2Writer(SER_GETHASH, PROTOCOL_VERSION);
 
-    // first hash the pastHash, txid, and voutNum, to create a combined 96 bits, which will be used in the nonce
-    hashWriter << pastHash;
-    hashWriter << txid;
-    hashWriter << voutNum;
+        // first hash the pastHash, txid, and voutNum, to create a combined 96 bits, which will be used in the nonce
+        hashWriter << pastHash;
+        hashWriter << txid;
+        hashWriter << voutNum;
 
-    arith_uint256 arNonce = (UintToArith256(*this) & posDiffMask) |
-        (UintToArith256(hashWriter.GetHash()) & entropyMask);
+        arith_uint256 arNonce = (UintToArith256(*this) & posDiffMask) |
+            (UintToArith256(hashWriter.GetHash()) & entropyMask);
 
-    hashWriter.Reset();
-    hashWriter << ArithToUint256(arNonce);
+        hashWriter.Reset();
+        hashWriter << ArithToUint256(arNonce);
 
-    return UintToArith256(*this) == (UintToArith256(hashWriter.GetHash()) << 128 | arNonce);
+        return UintToArith256(*this) == (UintToArith256(hashWriter.GetHash()) << 128 | arNonce);
+    }
+    else
+    {
+        // get low 96 bits of past hash and put it in top 96 bits of low 128 bits of nonce
+        CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+
+        // first hash the pastHash, txid, and voutNum, to create a combined 96 bits, which will be used in the nonce
+        hashWriter << pastHash;
+        hashWriter << txid;
+        hashWriter << voutNum;
+
+        arith_uint256 arNonce = (UintToArith256(*this) & posDiffMask) |
+            (UintToArith256(hashWriter.GetHash()) & entropyMask);
+
+        hashWriter.Reset();
+        hashWriter << ArithToUint256(arNonce);
+
+        return UintToArith256(*this) == (UintToArith256(hashWriter.GetHash()) << 128 | arNonce);
+    }
 }
 

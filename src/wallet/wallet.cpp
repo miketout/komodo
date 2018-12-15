@@ -1330,7 +1330,7 @@ bool CWallet::VerusSelectStakeOutput(CBlock *pBlock, arith_uint256 &hashResult, 
     txnouttype whichType;
     std:vector<std::vector<unsigned char>> vSolutions;
 
-    pBlock->nNonce.SetPOSTarget(bnTarget);
+    pBlock->nNonce.SetPOSTarget(bnTarget, pBlock->nVersion);
     target.SetCompact(bnTarget);
 
     pwalletMain->AvailableCoins(vecOutputs, true, NULL, false, false);

@@ -652,7 +652,11 @@ bool CBlockTreeDB::LoadBlockIndexGuts()
             CDiskBlockIndex diskindex;
             if (pcursor->GetValue(diskindex)) {
                 // Construct block index object
-                CBlockIndex* pindexNew = InsertBlockIndex(diskindex.GetBlockHash());
+                //if (diskindex.nVersion == CBlockHeader::VERUS_V2)
+                //{
+                //    printf("VerusHash 2.0 block header: %s\n", diskindex.ToString().c_str());
+                //}
+                CBlockIndex* pindexNew    = InsertBlockIndex(diskindex.GetBlockHash());
                 pindexNew->pprev          = InsertBlockIndex(diskindex.hashPrev);
                 pindexNew->SetHeight(diskindex.GetHeight());
                 pindexNew->nFile          = diskindex.nFile;
@@ -670,12 +674,23 @@ bool CBlockTreeDB::LoadBlockIndexGuts()
                 pindexNew->nCachedBranchId = diskindex.nCachedBranchId;
                 pindexNew->nTx            = diskindex.nTx;
                 pindexNew->nSproutValue   = diskindex.nSproutValue;
-                
+
                 // Consistency checks
                 auto header = pindexNew->GetBlockHeader();
-                if (header.GetHash() != pindexNew->GetBlockHash())
+                uint256 hash = header.GetHash();
+                if (diskindex.hashPrev.IsNull() && hash != Params().consensus.hashGenesisBlock)
+                {
+                    return error("LoadBlockIndex(): prior block hash NULL on non-genesis block: %s\n", diskindex.ToString());
+                }
+
+                if (hash != pindexNew->GetBlockHash())
+                {
+                    printf("Error -- hashes don't match.\nheader.GetHash: %s\nGetBlockHash(): %s\non disk: %s\nin memory: %s\n",
+                           hash.GetHex().c_str(), pindexNew->GetBlockHash().GetHex().c_str(), diskindex.ToString().c_str(),  pindexNew->ToString().c_str());
                     return error("LoadBlockIndex(): block header inconsistency detected: on-disk = %s, in-memory = %s",
                                  diskindex.ToString(),  pindexNew->ToString());
+                }
+
                 if ( 0 ) // POW will be checked before any block is connected
                 {
                     uint8_t pubkey33[33];

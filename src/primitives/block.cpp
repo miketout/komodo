@@ -31,8 +31,22 @@ uint256 CBlockHeader::GetVerusHash() const
 
 uint256 CBlockHeader::GetVerusV2Hash() const
 {
-    // no check for genesis block and use the optimized hash
-    return SerializeVerusHashV2(*this);
+    if (hashPrevBlock.IsNull())
+    {
+        // always use SHA256D for genesis block
+        return SerializeHash(*this);
+    }
+    else
+    {
+        if (nVersion == VERUS_V2)
+        {
+            return SerializeVerusHashV2b(*this);
+        }
+        else
+        {
+            return SerializeVerusHash(*this);
+        }
+    }
 }
 
 void CBlockHeader::SetSHA256DHash()
@@ -43,6 +57,11 @@ void CBlockHeader::SetSHA256DHash()
 void CBlockHeader::SetVerusHash()
 {
     CBlockHeader::hashFunction = &CBlockHeader::GetVerusHash;
+}
+
+void CBlockHeader::SetVerusV2Hash()
+{
+    CBlockHeader::hashFunction = &CBlockHeader::GetVerusV2Hash;
 }
 
 // returns false if unable to fast calculate the VerusPOSHash from the header. 
@@ -58,7 +77,7 @@ bool CBlockHeader::GetRawVerusPOSHash(uint256 &ret, int32_t nHeight) const
         ret = uint256();
         return false;
     }
-    
+
     // if we can calculate, this assumes the protocol that the POSHash calculation is:
     //    hashWriter << ASSETCHAINS_MAGIC;
     //    hashWriter << nNonce; (nNonce is:
@@ -69,12 +88,24 @@ bool CBlockHeader::GetRawVerusPOSHash(uint256 &ret, int32_t nHeight) const
     //                          )
     //    hashWriter << height;
     //    return hashWriter.GetHash();
-    CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+    if (nVersion == VERUS_V2)
+    {
+        CVerusHashV2Writer hashWriter = CVerusHashV2Writer(SER_GETHASH, PROTOCOL_VERSION);
 
-    hashWriter << ASSETCHAINS_MAGIC;
-    hashWriter << nNonce;
-    hashWriter << nHeight;
-    ret = hashWriter.GetHash();
+        hashWriter << ASSETCHAINS_MAGIC;
+        hashWriter << nNonce;
+        hashWriter << nHeight;
+        ret = hashWriter.GetHash();
+    }
+    else
+    {
+        CVerusHashWriter hashWriter = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+
+        hashWriter << ASSETCHAINS_MAGIC;
+        hashWriter << nNonce;
+        hashWriter << nHeight;
+        ret = hashWriter.GetHash();
+    }
     return true;
 }
 

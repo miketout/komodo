@@ -17,6 +17,8 @@ class CChainParams;
 class uint256;
 class arith_uint256;
 
+#define VERUSHASH2_SHIFT 9
+
 unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params&);
 unsigned int CalculateNextWorkRequired(arith_uint256 bnAvg,
                                        int64_t nLastBlockTime, int64_t nFirstBlockTime,

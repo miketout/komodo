@@ -22,7 +22,7 @@
 #endif // ENABLE_RUST
 uint32_t komodo_chainactive_timestamp();
 
-extern uint32_t ASSETCHAINS_ALGO, ASSETCHAINS_EQUIHASH, ASSETCHAINS_STAKED, ASSETCHAINS_LWMAPOS;
+extern uint32_t ASSETCHAINS_ALGO, ASSETCHAINS_EQUIHASH, ASSETCHAINS_VERUSHASH, ASSETCHAINS_STAKED, ASSETCHAINS_LWMAPOS;
 extern char ASSETCHAINS_SYMBOL[65];
 extern int32_t VERUS_BLOCK_POSUNITS, VERUS_CONSECUTIVE_POS_THRESHOLD, VERUS_NOPOS_THRESHHOLD;
 unsigned int lwmaGetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params);
@@ -114,16 +114,26 @@ unsigned int lwmaCalculateNextWorkRequired(const CBlockIndex* pindexLast, const 
 {
     arith_uint256 nextTarget {0}, sumTarget {0}, bnTmp, bnLimit;
     if (ASSETCHAINS_ALGO == ASSETCHAINS_EQUIHASH)
+    {
         bnLimit = UintToArith256(params.powLimit);
+    }
     else
+    {
         bnLimit = UintToArith256(params.powAlternate);
-
-    unsigned int nProofOfWorkLimit = bnLimit.GetCompact();
+    }
 
     // Find the first block in the averaging interval as we total the linearly weighted average
     const CBlockIndex* pindexFirst = pindexLast;
     const CBlockIndex* pindexNext;
     int64_t t = 0, solvetime, k = params.nLwmaAjustedWeight, N = params.nPowAveragingWindow;
+
+    // if changing from VerusHash V1 to V2, shift the last blocks by the same shift as the limit
+    int targetShift = 0;
+    if (CConstVerusSolutionVector::activationHeight.ActiveVersion(pindexLast->GetHeight() + 1))
+    {
+        bnLimit <<= VERUSHASH2_SHIFT;
+        targetShift = VERUSHASH2_SHIFT;
+    }
 
     for (int i = 0, j = N - 1; pindexFirst && i < N; i++, j--) {
         pindexNext = pindexFirst;
@@ -140,12 +150,16 @@ unsigned int lwmaCalculateNextWorkRequired(const CBlockIndex* pindexLast, const 
         // The factor is a part of the final equation. However we divide 
         // here to avoid potential overflow.
         bnTmp.SetCompact(pindexNext->nBits);
+        if (targetShift && !CConstVerusSolutionVector::activationHeight.ActiveVersion(pindexNext->GetHeight()))
+        {
+            bnTmp <<= targetShift;
+        }
         sumTarget += bnTmp / (k * N * N);
     }
 
     // Check we have enough blocks
     if (!pindexFirst)
-        return nProofOfWorkLimit;
+        return bnLimit.GetCompact();
 
     // Keep t reasonable in case strange solvetimes occurred.
     if (t < N * k / 3)
@@ -163,7 +177,7 @@ bool DoesHashQualify(const CBlockIndex *pbindex)
 {
     // if it fails hash test and PoW validation, consider it POS. it could also be invalid
     arith_uint256 hash = UintToArith256(pbindex->GetBlockHash());
-    // to be considered POS, we first can't qualify as POW
+    // to be considered POS in Komodo POS, non VerusPoS, we first can't qualify as POW
     if (hash > hash.SetCompact(pbindex->nBits))
     {
         return false;
@@ -415,7 +429,24 @@ bool CheckProofOfWork(const CBlockHeader &blkHeader, uint8_t *pubkey33, int32_t 
             }
         }
     }
-    arith_uint256 bnLimit = (height <= 1 || ASSETCHAINS_ALGO == ASSETCHAINS_EQUIHASH) ? UintToArith256(params.powLimit) : UintToArith256(params.powAlternate);
+
+    arith_uint256 bnLimit;
+    if (height <= 1 || ASSETCHAINS_ALGO == ASSETCHAINS_EQUIHASH)
+    {
+        bnLimit = UintToArith256(params.powLimit);
+    }
+    else if (ASSETCHAINS_ALGO == ASSETCHAINS_VERUSHASH)
+    {
+        if (CConstVerusSolutionVector::activationHeight.ActiveVersion(height) == CConstVerusSolutionVector::activationHeight.SOLUTION_VERUSV2)
+        {
+            bnLimit = UintToArith256(params.powAlternate) << VERUSHASH2_SHIFT;
+        }
+        else
+        {
+            bnLimit = UintToArith256(params.powAlternate);
+        }
+    }
+
     if (fNegative || bnTarget == 0 || fOverflow || bnTarget > bnLimit)
         return error("CheckProofOfWork(): nBits below minimum work");
     if ( ASSETCHAINS_STAKED != 0 )

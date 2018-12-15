@@ -3506,9 +3506,7 @@ UniValue z_getnewaddress(const UniValue& params, bool fHelp)
     if (!EnsureWalletIsAvailable(fHelp))
         return NullUniValue;
 
-    bool allowSapling = (Params().GetConsensus().vUpgrades[Consensus::UPGRADE_SAPLING].nActivationHeight <= chainActive.LastTip()->GetHeight());
-
-    std::string defaultType = ADDR_TYPE_SPROUT;
+    std::string defaultType = ADDR_TYPE_SAPLING;
 
     if (fHelp || params.size() > 1)
         throw runtime_error(
@@ -5166,7 +5164,7 @@ int32_t komodo_staked(CMutableTransaction &txNew,uint32_t nBits,uint32_t *blockt
             {
                 if ( IsMine(*pwalletMain,address) == 0 )
                     continue;
-                if ( GetTransaction(out.tx->GetHash(),tx,hashBlock,true) != 0 && (pindex= mapBlockIndex[hashBlock]) != 0 )
+                if ( GetTransaction(out.tx->GetHash(),tx,hashBlock,true) != 0 && mapBlockIndex.count(hashBlock) && (pindex= mapBlockIndex[hashBlock]) != 0 )
                 {
                     array = komodo_addutxo(array,&numkp,&maxkp,(uint32_t)pindex->nTime,(uint64_t)nValue,out.tx->GetHash(),out.i,(char *)CBitcoinAddress(address).ToString().c_str(),hashbuf,(CScript)pk);
                 }

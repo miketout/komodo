@@ -16,6 +16,7 @@
 #include "consensus/consensus.h"
 #include "hash.h"
 #include "nonce.h"
+#include "solutiondata.h"
 
 #ifndef __APPLE__
 #include <stdint.h>
@@ -709,25 +710,51 @@ public:
     // verus hash will be the same for a given txid, output number, block height, and blockhash of 100 blocks past
     static uint256 _GetVerusPOSHash(CPOSNonce *pNonce, const uint256 &txid, int32_t voutNum, int32_t height, const uint256 &pastHash, int64_t value)
     {
-        pNonce->SetPOSEntropy(pastHash, txid, voutNum);
-        CVerusHashWriter hashWriter  = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
-
-        hashWriter << ASSETCHAINS_MAGIC;
-
-        // we only use the new style of POS hash after changeover and 100 blocks of enforced proper nonce updating
-        if (CPOSNonce::NewPOSActive(height))
+        if (CVerusSolutionVector::GetVersionByHeight(height) > 0)
         {
-            hashWriter << *pNonce;
-            hashWriter << height;
-            return ArithToUint256(UintToArith256(hashWriter.GetHash()) / value);
+            pNonce->SetPOSEntropy(pastHash, txid, voutNum, CPOSNonce::VERUS_V2);
+            CVerusHashV2Writer hashWriter  = CVerusHashV2Writer(SER_GETHASH, PROTOCOL_VERSION);
+
+            hashWriter << ASSETCHAINS_MAGIC;
+
+            // we only use the new style of POS hash after changeover and 100 blocks of enforced proper nonce updating
+            if (CPOSNonce::NewPOSActive(height))
+            {
+                hashWriter << *pNonce;
+                hashWriter << height;
+                return ArithToUint256(UintToArith256(hashWriter.GetHash()) / value);
+            }
+            else
+            {
+                hashWriter << pastHash;
+                hashWriter << height;
+                hashWriter << txid;
+                hashWriter << voutNum;
+                return ArithToUint256(UintToArith256(hashWriter.GetHash()) / value);
+            }
         }
         else
         {
-            hashWriter << pastHash;
-            hashWriter << height;
-            hashWriter << txid;
-            hashWriter << voutNum;
-            return ArithToUint256(UintToArith256(hashWriter.GetHash()) / value);
+            pNonce->SetPOSEntropy(pastHash, txid, voutNum, CPOSNonce::VERUS_V1);
+            CVerusHashWriter hashWriter  = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+
+            hashWriter << ASSETCHAINS_MAGIC;
+
+            // we only use the new style of POS hash after changeover and 100 blocks of enforced proper nonce updating
+            if (CPOSNonce::NewPOSActive(height))
+            {
+                hashWriter << *pNonce;
+                hashWriter << height;
+                return ArithToUint256(UintToArith256(hashWriter.GetHash()) / value);
+            }
+            else
+            {
+                hashWriter << pastHash;
+                hashWriter << height;
+                hashWriter << txid;
+                hashWriter << voutNum;
+                return ArithToUint256(UintToArith256(hashWriter.GetHash()) / value);
+            }
         }
     }
 
