@@ -38,8 +38,7 @@ build:linux:
   - zcutil/build.sh -j$(nproc)
   - mkdir verus-cli
   - cp src/verusd
-      src/verus-cli
-      src/fiat/verus
+      src/verus
       doc/man/verus-cli/linux/README.txt
       zcutil/fetch-params.sh
       zcutil/upgrade-agama.sh
@@ -47,10 +46,10 @@ build:linux:
   - mv verus-cli/fetch-params.sh verus-cli/fetch-params
   - chmod +x verus-cli/verus
   - chmod +x verus-cli/verusd
-  - chmod +x verus-cli/verus-cli
   - chmod +x verus-cli/fetch-params
   - chmod +x verus-cli/upgrade-agama.sh
-  - if [ "${CI_COMMIT_REF_NAME}" = "master" ]; then strip -g verus-cli/verus && strip -g verus-cli/verus-cli; fi
+  - if [ "${CI_COMMIT_REF_NAME}" = "master" ]; then strip -g verus-cli/verus && strip -g verus-cli/verusd; fi
+  -
   - tar -czvf ${VERUS_CLI_LINUX} verus-cli
   - sha256sum ${VERUS_CLI_LINUX} > ${VERUS_CLI_LINUX}.sha256
   after_script:
