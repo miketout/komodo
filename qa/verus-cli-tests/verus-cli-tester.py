@@ -2,7 +2,7 @@ from subprocess import Popen, check_output, call
 from time import sleep
 from os import environ, path
 from sys import platform
-if platform == "win32"
+if platform == "win32":
     daemon_wrapper = "verusd"
 else
     daemon_wrapper = "verusd.sh"
