@@ -49,4 +49,3 @@ CXXFLAGS='-arch x86_64 -I/usr/local/Cellar/gcc\@6/6.4.0_2/include/c++/6.4.0/ -I$
 
 make "$@" V=1 NO_GTEST=1 STATIC=1
 mv src/komodod src/verusd
-/usr/local/Cellar/gcc@5/5.5.0_2:
