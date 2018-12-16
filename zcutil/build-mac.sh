@@ -2,7 +2,7 @@
 export CC=gcc-6
 export CXX=g++-6
 export LIBTOOL=libtool
-export AR=gar
+export AR=ar
 export RANLIB=ranlib
 export STRIP=strip
 export OTOOL=otool
