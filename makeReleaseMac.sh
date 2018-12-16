@@ -5,6 +5,7 @@ mkdir ${KMD_DIR}
 
 cp src/fiat/verus \
    src/verusd \
+   src/verusd.sh \
    doc/man/verus-cli/mac/README.txt \
    zcutil/fetch-params.sh \
    zcutil/upgrade-agama.sh
