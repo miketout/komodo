@@ -4,7 +4,7 @@ from os import environ, path
 from sys import platform
 if platform == "win32":
     daemon_wrapper = "verusd"
-else
+else:
     daemon_wrapper = "verusd.sh"
 
 cli_wrapper = "verus"
