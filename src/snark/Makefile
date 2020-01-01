@@ -13,9 +13,15 @@ else
     uname_S := $(shell uname -s)
 endif
 
+ifdef ARCH_ARM
+	PLATFORM_VARIANT = armv8.1-a+crypto
+else
+	PLATFORM_VARIANT = x86-64
+endif
+
 # To override these, use "make OPTFLAGS=..." etc.
 CURVE = BN128
-OPTFLAGS = -O2 -march=x86-64 -g -mtune=x86-64
+OPTFLAGS = -O2 -march=$(PLATFORM_VARIANT) -g -mtune=$(PLATFORM_VARIANT)
 
 ifneq ($(PLATFORM),darwin)
 	FEATUREFLAGS = -DUSE_ASM -DMONTGOMERY_OUTPUT
@@ -166,7 +172,7 @@ ifeq ($(DEBUG),1)
 endif
 
 ifeq ($(PERFORMANCE),1)
-        OPTFLAGS = -O3 -march=x86-64 -g -mtune=x86-64
+        OPTFLAGS = -O3 -march=$(PLATFORM_VARIANT) -g -mtune=$(PLATFORM_VARIANT)
         CXXFLAGS += -DNDEBUG
         # Enable link-time optimization:
         CXXFLAGS += -flto -fuse-linker-plugin
