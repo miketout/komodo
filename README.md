@@ -80,7 +80,7 @@ Windows cross-compile
 ```shell
 #The following packages are needed:
 sudo apt-get install autoconf automake autogen bsdmainutils cmake curl git libc6-dev libcap-dev libdb++-dev libqrencode-dev libprotobuf-dev libssl-dev libtool libz-dev libbz2-dev m4 make mingw-w64 ncurses-dev pkg-config protobuf-compiler python python-zmq unzip wget zip zlib1g-dev 
-
+```
 Building
 --------
 
