@@ -189,7 +189,7 @@ int32_t CBlockHeader::GetPBaaSHeader(CPBaaSBlockHeader &pbh, const uint160 &cID)
     {
         // search in the solution for this header index and return it if found
         CPBaaSSolutionDescriptor d = CVerusSolutionVector::solutionTools.GetDescriptor(nSolution);
-        if (CVerusSolutionVector::solutionTools.IsPBaaS(nSolution) != 0)
+        if (CVerusSolutionVector::solutionTools.HasPBaaSHeader(nSolution) != 0)
         {
             int32_t len = CVerusSolutionVector::solutionTools.ExtraDataLen(nSolution);
             int32_t numHeaders = d.numPBaaSHeaders;
@@ -297,7 +297,7 @@ uint256 CBlockHeader::GetVerusV2Hash() const
 
             // in order for this to work, the PBaaS hash of the pre-header must match the header data
             // otherwise, it cannot clear the canonical data and hash in a chain-independent manner
-            if (CConstVerusSolutionVector::IsPBaaS(nSolution) && CheckNonCanonicalData())
+            if (CConstVerusSolutionVector::HasPBaaSHeader(nSolution) && CheckNonCanonicalData())
             {
                 CBlockHeader bh = CBlockHeader(*this);
                 bh.ClearNonCanonicalData();

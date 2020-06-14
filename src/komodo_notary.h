@@ -353,7 +353,7 @@ int32_t komodo_notaries(uint8_t pubkeys[64][33],int32_t height,uint32_t timestam
     static int32_t n0, n1, n2, n4;
     int32_t i, htind, n;
     uint64_t mask = 0;
-    struct knotary_entry *kp,*tmp;
+    struct knotary_entry *kp, *tmp;
     if ( timestamp == 0 && ASSETCHAINS_SYMBOL[0] != 0 )
         timestamp = komodo_heightstamp(height);
     else if ( ASSETCHAINS_SYMBOL[0] == 0 )

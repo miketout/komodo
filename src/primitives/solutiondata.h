@@ -35,6 +35,7 @@ class CActivationHeight
             ACTIVATE_EXTENDEDSTAKE = SOLUTION_VERUSV5,
             ACTIVATE_IDCONSENSUS2 = SOLUTION_VERUSV5,
             ACTIVATE_VERUSHASH2_2 = SOLUTION_VERUSV5,
+            ACTIVATE_PBAAS_HEADER = SOLUTION_VERUSV5_1,
             ACTIVATE_STAKEHEADER = SOLUTION_VERUSV6,
             ACTIVATE_PBAAS = SOLUTION_VERUSV6
         };
@@ -346,6 +347,15 @@ class CConstVerusSolutionVector
             return 0;
         }
 
+        static int32_t HasPBaaSHeader(const std::vector<unsigned char> &vch)
+        {
+            if (Version(vch) >= CActivationHeight::ACTIVATE_PBAAS_HEADER)
+            {
+                return  (DescriptorBits(vch) & SOLUTION_POW) ? 1 : -1;
+            }
+            return 0;
+        }
+
         static const CPBaaSBlockHeader *GetFirstPBaaSHeader(const std::vector<unsigned char> &vch)
         {
             return (CPBaaSBlockHeader *)(&vch[0] + sizeof(CPBaaSSolutionDescriptor)); // any headers present are right after descriptor
@@ -443,6 +453,12 @@ class CVerusSolutionVector
         int32_t IsPBaaS()
         {
             return solutionTools.IsPBaaS(vch);
+        }
+
+        // returns 0 if not PBaaS, 1 if PBaaS PoW, -1 if PBaaS PoS
+        int32_t HasPBaaSHeader()
+        {
+            return solutionTools.HasPBaaSHeader(vch);
         }
 
         const CPBaaSBlockHeader *GetFirstPBaaSHeader() const

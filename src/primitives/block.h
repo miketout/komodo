@@ -95,6 +95,15 @@ public:
         return 0;
     }
 
+    int32_t HasPBaaSHeader() const
+    {
+        if (nVersion == VERUS_V2)
+        {
+            return CConstVerusSolutionVector::HasPBaaSHeader(nSolution);
+        }
+        return 0;
+    }
+
     // return a vector of bytes that contains the internal data for this solution vector
     void GetExtraData(std::vector<unsigned char> &dataVec)
     {
@@ -126,7 +135,7 @@ public:
         // search in the solution for this header index and return it if found
         CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(nSolution);
         int pbType;
-        if (nVersion == VERUS_V2 && CConstVerusSolutionVector::IsPBaaS(nSolution) != 0 && idx < descr.numPBaaSHeaders)
+        if (nVersion == VERUS_V2 && CConstVerusSolutionVector::HasPBaaSHeader(nSolution) != 0 && idx < descr.numPBaaSHeaders)
         {
             pbh = *(CConstVerusSolutionVector::GetFirstPBaaSHeader(nSolution) + idx);
             return true;
@@ -150,7 +159,7 @@ public:
 
         CVerusSolutionVector sv = CVerusSolutionVector(nSolution);
 
-        if (sv.IsPBaaS() && !pbh.IsNull() && idx < sv.GetNumPBaaSHeaders() && (((ix = GetPBaaSHeader(pbbh, pbh.chainID)) == -1) || ix == idx))
+        if (sv.HasPBaaSHeader() && !pbh.IsNull() && idx < sv.GetNumPBaaSHeaders() && (((ix = GetPBaaSHeader(pbbh, pbh.chainID)) == -1) || ix == idx))
         {
             sv.SetPBaaSHeader(pbh, idx);
             return true;
