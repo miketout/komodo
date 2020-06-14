@@ -43,6 +43,7 @@ void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fInclud
 {
     txnouttype type;
     vector<CTxDestination> addresses;
+    CCurrencyValueMap tokensOut = scriptPubKey.ReserveOutValue();
 
     // needs to be an object
     if (!out.isObject())
@@ -59,17 +60,17 @@ void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fInclud
     {
         switch(p.evalCode)
         {
-            case EVAL_PBAASDEFINITION:
+            case EVAL_CURRENCY_DEFINITION:
             {
-                CPBaaSChainDefinition definition;
+                CCurrencyDefinition definition;
 
-                if (p.vData.size() && (definition = CPBaaSChainDefinition(p.vData[0])).IsValid())
+                if (p.vData.size() && (definition = CCurrencyDefinition(p.vData[0])).IsValid())
                 {
-                    out.push_back(Pair("pbaasChainDefinition", definition.ToUniValue()));
+                    out.push_back(Pair("currencydefinition", definition.ToUniValue()));
                 }
                 else
                 {
-                    out.push_back(Pair("pbaasChainDefinition", "invalid"));
+                    out.push_back(Pair("currencydefinition", "invalid"));
                 }
                 break;
             }
@@ -105,13 +106,13 @@ void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fInclud
                 break;
             }
 
-            case EVAL_FINALIZENOTARIZATION:
+            case EVAL_FINALIZE_NOTARIZATION:
             {
-                CNotarizationFinalization finalization;
+                CTransactionFinalization finalization;
 
                 if (p.vData.size())
                 {
-                    finalization = CNotarizationFinalization(p.vData[0]);
+                    finalization = CTransactionFinalization(p.vData[0]);
                     out.push_back(Pair("pbaasFinalization", finalization.ToUniValue()));
                 }
                 break;
@@ -149,9 +150,9 @@ void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fInclud
 
             case EVAL_RESERVE_OUTPUT:
             {
-                CReserveOutput ro;
+                CTokenOutput ro;
 
-                if (p.vData.size() && (ro = CReserveOutput(p.vData[0])).IsValid())
+                if (p.vData.size() && (ro = CTokenOutput(p.vData[0])).IsValid())
                 {
                     out.push_back(Pair("reserveoutput", ro.ToUniValue()));
                 }
@@ -179,9 +180,9 @@ void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fInclud
 
             case EVAL_RESERVE_DEPOSIT:
             {
-                CReserveOutput ro;
+                CTokenOutput ro;
 
-                if (p.vData.size() && (ro = CReserveOutput(p.vData[0])).IsValid())
+                if (p.vData.size() && (ro = CTokenOutput(p.vData[0])).IsValid())
                 {
                     out.push_back(Pair("reservedeposit", ro.ToUniValue()));
                 }
@@ -257,8 +258,33 @@ void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fInclud
                 out.push_back(Pair("stakeguard", ""));
                 break;
 
+            case EVAL_FINALIZE_EXPORT:
+            {
+                CTransactionFinalization finalization;
+
+                if (p.vData.size())
+                {
+                    finalization = CTransactionFinalization(p.vData[0]);
+                    out.push_back(Pair("finalizeexport", finalization.ToUniValue()));
+                }
+                break;
+            }
+
             default:
                 out.push_back(Pair("unknown", ""));
+        }
+    }
+
+    if (tokensOut.valueMap.size())
+    {
+        UniValue reserveBal(UniValue::VOBJ);
+        for (auto &oneBalance : tokensOut.valueMap)
+        {
+            reserveBal.push_back(make_pair(ConnectedChains.GetCachedCurrency(oneBalance.first).name, ValueFromAmount(oneBalance.second)));
+        }
+        if (reserveBal.size())
+        {
+            out.push_back(Pair("reserve_balance", reserveBal));
         }
     }
 

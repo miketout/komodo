@@ -270,8 +270,13 @@ public:
     //! pointer to the index of some further predecessor of this block
     CBlockIndex* pskip;
 
-    //! height of the entry in the chain. The genesis block has height 0
-    int64_t newcoins,zfunds; int8_t segid; // jl777 fields
+    int64_t newcoins;
+    int64_t zfunds;
+    int64_t immature;       // how much in this block is immature
+    uint32_t maturity;      // when do the immature funds in this block mature?
+
+    int8_t segid; // jl777 fields
+
     //! Which # file this block is stored in (blk?????.dat)
     int nFile;
 
@@ -341,6 +346,8 @@ public:
     {
         phashBlock = NULL;
         newcoins = zfunds = 0;
+        maturity = 0;
+        immature = 0;
         segid = -2;
         pprev = NULL;
         pskip = NULL;
@@ -505,30 +512,55 @@ public:
     }
 
     bool GetRawVerusPOSHash(uint256 &ret) const;
-    uint256 GetVerusEntropyHash() const;
+    uint256 GetVerusEntropyHashComponent() const;
+
+    uint256 BlockMMRRoot() const
+    {
+        if (nVersion == CBlockHeader::VERUS_V2)
+        {
+            CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor((nSolution));
+            if (descr.version >= CActivationHeight::ACTIVATE_PBAAS)
+            {
+                return descr.hashBlockMMRRoot;
+            }
+        }
+        return hashMerkleRoot;
+    }
+
+    uint256 PrevMMRRoot()
+    {
+        if (nVersion == CBlockHeader::VERUS_V2)
+        {
+            CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(nSolution);
+            if (descr.version >= CActivationHeight::ACTIVATE_PBAAS)
+            {
+                return descr.hashPrevMMRRoot;
+            }
+        }
+        return uint256();
+    }
 
     // return a node from this block index as is, including hash of merkle root and block hash as well as compact chain power, to put into an MMR
-    CMMRPowerNode GetMMRNode()
+    ChainMMRNode GetBlockMMRNode() const
     {
         uint256 blockHash = GetBlockHash();
 
-        uint256 preHash = Hash(BEGIN(hashMerkleRoot), END(hashMerkleRoot), BEGIN(blockHash), END(blockHash));
+        uint256 preHash = ChainMMRNode::HashObj(BlockMMRRoot(), blockHash);
         uint256 power = ArithToUint256(GetCompactPower(nNonce, nBits, nVersion));
 
-        return CMMRPowerNode(Hash(BEGIN(preHash), END(preHash), BEGIN(power), END(power)), power);
+        return ChainMMRNode(ChainMMRNode::HashObj(preHash, power), power);
     }
 
-    void AddMerkleProofBridge(CMerkleBranch &branch)
+    CMMRNodeBranch MMRProofBridge()
     {
         // we need to add the block hash on the right, no change to index, as bit is zero
-        branch.branch.push_back(GetBlockHash());
+        return CMMRNodeBranch(CMMRNodeBranch::BRANCH_MMRBLAKE_NODE, 2, 0, std::vector<uint256>({GetBlockHash()}));
     }
 
-    void AddBlockProofBridge(CMerkleBranch &branch)
+    CMMRNodeBranch BlockProofBridge()
     {
         // we need to add the merkle root on the left
-        branch.nIndex |= (1 << branch.branch.size());
-        branch.branch.push_back(hashMerkleRoot);
+        return CMMRNodeBranch(CMMRNodeBranch::BRANCH_MMRBLAKE_NODE, 2, 1, std::vector<uint256>({BlockMMRRoot()}));
     }
 };
 
@@ -633,6 +665,10 @@ public:
     }
 };
 
+class CChain;
+typedef CMerkleMountainRange<ChainMMRNode, CChunkedLayer<ChainMMRNode, 9>, COverlayNodeLayer<ChainMMRNode, CChain>> ChainMerkleMountainRange;
+typedef CMerkleMountainView<ChainMMRNode, CChunkedLayer<ChainMMRNode, 9>, COverlayNodeLayer<ChainMMRNode, CChain>> ChainMerkleMountainView;
+
 /** An in-memory indexed chain of blocks. 
  * With Verus and PBaaS chains, this also provides a complete Merkle Mountain Range (MMR) for the chain at all times,
  * enabling proof of any transaction that can be exported and trusted on any chain that has a trusted oracle or other lite proof of this chain.
@@ -640,11 +676,11 @@ public:
 class CChain {
 private:
     std::vector<CBlockIndex*> vChain;
-    CMerkleMountainRange<CMMRPowerNode, CChunkedLayer<CMMRPowerNode>, COverlayNodeLayer<CMMRPowerNode, CChain>> mmr;
+    ChainMerkleMountainRange mmr;
     CBlockIndex *lastTip;
 
 public:
-    CChain() : vChain(), mmr(COverlayNodeLayer<CMMRPowerNode, CChain>(*this)) {}
+    CChain() : vChain(), mmr(COverlayNodeLayer<ChainMMRNode, CChain>(*this)) {}
 
     /** Returns the index entry for the genesis block of this chain, or NULL if none. */
     CBlockIndex *Genesis() const {
@@ -668,54 +704,27 @@ public:
         return vChain[nHeight];
     }
 
+    uint256 GetVerusEntropyHash(int forHeight, int *pPOSheight=nullptr, int *pPOWheight=nullptr, int *pALTheight=nullptr) const;
+
     /** Get the Merkle Mountain Range for this chain. */
-    const CMerkleMountainRange<CMMRPowerNode, CChunkedLayer<CMMRPowerNode>, COverlayNodeLayer<CMMRPowerNode, CChain>> &GetMMR()
+    const ChainMerkleMountainRange &GetMMR()
     {
         return mmr;
     }
 
     /** Get a Merkle Mountain Range view for this chain. */
-    CMerkleMountainView<CMMRPowerNode, CChunkedLayer<CMMRPowerNode>, COverlayNodeLayer<CMMRPowerNode, CChain>> GetMMV()
+    ChainMerkleMountainView GetMMV()
     {
-        return CMerkleMountainView<CMMRPowerNode, CChunkedLayer<CMMRPowerNode>, COverlayNodeLayer<CMMRPowerNode, CChain>>(mmr, mmr.size());
+        return ChainMerkleMountainView(mmr, mmr.size());
     }    
 
-    CMMRPowerNode GetMMRNode(int index)
+    ChainMMRNode GetMMRNode(int index) const
     {
-        return vChain[index]->GetMMRNode();
+        return vChain[index]->GetBlockMMRNode();
     }
 
-    bool GetBlockProof(CMerkleMountainView<CMMRPowerNode, CChunkedLayer<CMMRPowerNode>, COverlayNodeLayer<CMMRPowerNode, CChain>> &view, 
-                       CMerkleBranch &retBranch,
-                       int index)
-    {
-        CBlockIndex *pindex = (index < 0 || index >= (int)vChain.size()) ? NULL : vChain[index];
-        if (pindex)
-        {
-            pindex->AddBlockProofBridge(retBranch);
-            return view.GetProof(retBranch, index);
-        }
-        else
-        {
-            return false;
-        }
-    }
-
-    bool GetMerkleProof(CMerkleMountainView<CMMRPowerNode, CChunkedLayer<CMMRPowerNode>, COverlayNodeLayer<CMMRPowerNode, CChain>> &view, 
-                        CMerkleBranch &retBranch,
-                        int index)
-    {
-        CBlockIndex *pindex = (index < 0 || index >= (int)vChain.size()) ? NULL : vChain[index];
-        if (pindex)
-        {
-            pindex->AddMerkleProofBridge(retBranch);
-            return view.GetProof(retBranch, index);
-        }
-        else
-        {
-            return false;
-        }
-    }
+    bool GetBlockProof(ChainMerkleMountainView &view, CMMRProof &retProof, int index) const;
+    bool GetMerkleProof(ChainMerkleMountainView &view, CMMRProof &retProof, int index) const;
 
     /** Compare two chains efficiently. */
     friend bool operator==(const CChain &a, const CChain &b) {
@@ -725,7 +734,7 @@ public:
 
     /** Efficiently check whether a block is present in this chain. */
     bool Contains(const CBlockIndex *pindex) const {
-        return (*this)[pindex->GetHeight()] == pindex;
+        return !pindex ? false : (*this)[pindex->GetHeight()] == pindex;
     }
 
     /** Find the successor of a block in this chain, or NULL if the given index is not found or is the tip. */
@@ -757,8 +766,5 @@ public:
 };
 
 CChainPower ExpandCompactPower(uint256 compactPower, uint32_t height = 0);
-
-typedef CMerkleMountainRange<CMMRPowerNode, CChunkedLayer<CMMRPowerNode>, COverlayNodeLayer<CMMRPowerNode, CChain>> ChainMerkleMountainRange;
-typedef CMerkleMountainView<CMMRPowerNode, CChunkedLayer<CMMRPowerNode>, COverlayNodeLayer<CMMRPowerNode, CChain>> ChainMerkleMountainView;
 
 #endif // BITCOIN_CHAIN_H

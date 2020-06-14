@@ -40,21 +40,14 @@ BITCOIN_INCLUDES=-I$(builddir) -I$(builddir)/obj $(BDB_CPPFLAGS) $(BOOST_CPPFLAG
 
 BITCOIN_INCLUDES += -I$(srcdir)/secp256k1/include
 BITCOIN_INCLUDES += -I$(srcdir)/cryptoconditions/include
+BITCOIN_INCLUDES += -I$(srcdir)/cryptoconditions/src/include/falcon
 BITCOIN_INCLUDES += -I$(srcdir)/cryptoconditions/src
 BITCOIN_INCLUDES += -I$(srcdir)/cryptoconditions/src/asn
 BITCOIN_INCLUDES += -I$(srcdir)/snark
 BITCOIN_INCLUDES += -I$(srcdir)/snark/libsnark
 BITCOIN_INCLUDES += -I$(srcdir)/univalue/include
 
-if TARGET_WINDOWS
 LIBBITCOIN_SERVER=libbitcoin_server.a -lcurl
-endif
-if TARGET_DARWIN
-LIBBITCOIN_SERVER=libbitcoin_server.a -lcurl
-else
-LIBBITCOIN_SERVER=libbitcoin_server.a -lcurl
-endif
-
 LIBBITCOIN_WALLET=libbitcoin_wallet.a
 LIBBITCOIN_COMMON=libbitcoin_common.a
 LIBBITCOIN_CLI=libbitcoin_cli.a
@@ -82,7 +75,7 @@ LIBBITCOIN_WALLET=libbitcoin_wallet.a
 endif
 
 $(LIBSECP256K1): $(wildcard secp256k1/src/*) $(wildcard secp256k1/include/*)
-	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F) OPTFLAGS="-O2 -march=$(PLATFORM_VARIANT) -g "
+	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F) OPTFLAGS="-O3 -march=$(PLATFORM_VARIANT) -g "
 
 LIBSNARK_CXXFLAGS = $(AM_CXXFLAGS) $(PIC_FLAGS) -DBINARY_OUTPUT -DNO_PT_COMPRESSION=1 -fstack-protector-all
 LIBSNARK_CONFIG_FLAGS = CURVE=ALT_BN128 NO_PROCPS=1 NO_DOCS=1 STATIC=1 NO_SUPERCOP=1 FEATUREFLAGS=-DMONTGOMERY_OUTPUT NO_COPY_DEPINST=1 NO_COMPILE_LIBGTEST=1
@@ -100,10 +93,10 @@ libsnark-tests: $(wildcard snark/src/*)
 	$(AM_V_at) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" CXXFLAGS="$(LIBSNARK_CXXFLAGS)" $(MAKE) $(AM_MAKEFLAGS) -C snark/ check DEPINST="$(LIBSNARK_DEPINST)" $(LIBSNARK_CONFIG_FLAGS) OPTFLAGS="$(LIBSNARK_OPTFLAGS)"
 
 $(LIBUNIVALUE): $(wildcard univalue/lib/*)
-	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F) OPTFLAGS="-O2 -march=$(PLATFORM_VARIANT) -g "
+	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F) OPTFLAGS="-O3 -march=$(PLATFORM_VARIANT) -g "
 
 $(LIBCRYPTOCONDITIONS): $(wildcard cryptoconditions/src/*) $(wildcard cryptoconditions/include/*)
-	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F) OPTFLAGS="-O2 -march=$(PLATFORM_VARIANT) -g "
+	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F) OPTFLAGS="-O3 -march=$(PLATFORM_VARIANT) -g "
 
 # Make is not made aware of per-object dependencies to avoid limiting building parallelization
 # But to build the less dependent modules first, we manually select their order here:
@@ -360,7 +353,6 @@ libbitcoin_server_a_SOURCES = \
   net.cpp \
   noui.cpp \
   notarisationdb.cpp \
-  pbaas/crosschainrpc.cpp \
   pbaas/identity.cpp \
   pbaas/notarization.cpp \
   pbaas/pbaas.cpp \
@@ -529,6 +521,8 @@ libbitcoin_common_a_SOURCES = \
   keystore.cpp \
   netbase.cpp \
   metrics.cpp \
+  mmr.cpp \
+  pbaas/crosschainrpc.cpp \
   primitives/block.cpp \
   primitives/transaction.cpp \
   primitives/nonce.cpp \
@@ -594,6 +588,10 @@ verusd_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 verusd_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 verusd_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
+if TARGET_DARWIN
+verusd_LDFLAGS += -static-libgcc
+endif
+
 if TARGET_WINDOWS
 verusd_SOURCES += bitcoind-res.rc
 endif
@@ -643,6 +641,10 @@ verus_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(EVENT_CFLAGS)
 verus_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 verus_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
+if TARGET_DARWIN
+verus_LDFLAGS += -static-libgcc
+endif
+
 # wallet-utility binary #
 if ENABLE_WALLET
 wallet_utility_SOURCES = wallet-utility.cpp
@@ -672,6 +674,7 @@ verus_LDADD = \
 if ENABLE_WALLET
 wallet_utility_LDADD = \
 	libbitcoin_wallet.a \
+  $(LIBUNIVALUE) \
 	$(LIBBITCOIN_COMMON) \
 	$(LIBBITCOIN_CRYPTO) \
 	$(LIBVERUS_CRYPTO) \
@@ -697,9 +700,9 @@ if TARGET_WINDOWS
 verus_tx_SOURCES += bitcoin-tx-res.rc
 endif
 
-# FIXME: Is libzcash needed for zcash_tx?
 verus_tx_LDADD = \
   $(LIBUNIVALUE) \
+	$(BOOST_LIBS) \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_UTIL) \
   $(LIBSECP256K1) \

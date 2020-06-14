@@ -65,20 +65,28 @@ bool UnpackStakeOpRet(const CTransaction &stakeTx, std::vector<std::vector<unsig
 
 CStakeParams::CStakeParams(const std::vector<std::vector<unsigned char>> &vData)
 {
-    // A stake OP_RETURN contains:
+    // An original format stake OP_RETURN contains:
     // 1. source block height in little endian 32 bit
     // 2. target block height in little endian 32 bit
     // 3. 32 byte prev block hash
     // 4. 33 byte pubkey, or not present to use same as stake destination
-
+    // New format serialization and deserialization is handled by normal stream serialization.
+    version = VERSION_INVALID;
     srcHeight = 0;
     blkHeight = 0;
     if (vData[0].size() == 1 && 
+        vData[0][0] == OPRETTYPE_STAKEPARAMS2 &&
+        vData.size() == 2)
+    {
+        ::FromVector(vData[1], *this);
+    }
+    else if (vData[0].size() == 1 && 
         vData[0][0] == OPRETTYPE_STAKEPARAMS && vData[1].size() <= 4 && 
         vData[2].size() <= 4 && 
         vData[3].size() == sizeof(prevHash) &&
         (vData.size() == STAKE_MINPARAMS || (vData.size() == STAKE_MAXPARAMS && vData[4].size() == 33)))
     {
+        version = VERSION_ORIGINAL;
         for (int i = 0, size = vData[1].size(); i < size; i++)
         {
             srcHeight = srcHeight | vData[1][i] << (8 * i);
@@ -101,12 +109,14 @@ CStakeParams::CStakeParams(const std::vector<std::vector<unsigned char>> &vData)
             {
                 // invalidate
                 srcHeight = 0;
+                version = VERSION_INVALID;
             }
         }
         else
         {
             // invalidate
             srcHeight = 0;
+            version = VERSION_INVALID;
         }
     }
 }
@@ -132,9 +142,8 @@ bool GetStakeParams(const CTransaction &stakeTx, CStakeParams &stakeParams)
 // this validates the format of the stake transaction and, optionally, whether or not it is 
 // properly signed to spend the source stake.
 // it does not validate the relationship to a coinbase guard, PoS eligibility or the actual stake spend.
-// the only time it matters
-// is to validate a properly formed stake transaction for either pre-check before PoS validity check, or to
-// validate the stake transaction on a fork that will be used to spend a winning stake that cheated by being posted
+// the only time it matters is to validate a properly formed stake transaction for either pre-check before PoS validity check, 
+// or to validate the stake transaction on a fork that will be used to spend a winning stake that cheated by being posted
 // on two fork chains
 bool ValidateStakeTransaction(const CTransaction &stakeTx, CStakeParams &stakeParams, bool validateSig)
 {
@@ -153,19 +162,28 @@ bool ValidateStakeTransaction(const CTransaction &stakeTx, CStakeParams &stakePa
         if (myGetTransaction(stakeTx.vin[0].prevout.hash, srcTx, blkHash))
         {
             BlockMap::const_iterator it = mapBlockIndex.find(blkHash);
-            if (it != mapBlockIndex.end() && (pindex = it->second) != NULL)
+            if (it != mapBlockIndex.end() && (pindex = it->second) != NULL && chainActive.Contains(pindex))
             {
                 std::vector<std::vector<unsigned char>> vAddr = std::vector<std::vector<unsigned char>>();
+                bool extendedStake = CConstVerusSolutionVector::GetVersionByHeight(stakeParams.blkHeight) >= CActivationHeight::ACTIVATE_EXTENDEDSTAKE;
+                COptCCParams p;
 
                 if (stakeParams.srcHeight == pindex->GetHeight() && 
                     (stakeParams.blkHeight - stakeParams.srcHeight >= VERUS_MIN_STAKEAGE) &&
-                    Solver(srcTx.vout[stakeTx.vin[0].prevout.n].scriptPubKey, txType, vAddr))
+                    ((srcTx.vout[stakeTx.vin[0].prevout.n].scriptPubKey.IsPayToCryptoCondition(p) &&
+                      extendedStake && 
+                      p.IsValid() &&
+                      srcTx.vout[stakeTx.vin[0].prevout.n].scriptPubKey.IsSpendableOutputType(p)) ||
+                    (!p.IsValid() && Solver(srcTx.vout[stakeTx.vin[0].prevout.n].scriptPubKey, txType, vAddr))))
                 {
-                    if (txType == TX_PUBKEY && !stakeParams.pk.IsValid())
+                    if (!p.IsValid() && txType == TX_PUBKEY && !stakeParams.pk.IsValid())
                     {
                         stakeParams.pk = CPubKey(vAddr[0]);
                     }
-                    if ((txType == TX_PUBKEY) || (txType == TX_PUBKEYHASH && stakeParams.pk.IsFullyValid()))
+                    // once extended stake hits, we only accept extended form of staking
+                    if (!(extendedStake && stakeParams.Version() < stakeParams.VERSION_EXTENDED_STAKE) &&
+                        !(!extendedStake && stakeParams.Version() >= stakeParams.VERSION_EXTENDED_STAKE) &&
+                        ((extendedStake && p.IsValid()) || (txType == TX_PUBKEY) || (txType == TX_PUBKEYHASH && (extendedStake || stakeParams.pk.IsFullyValid()))))
                     {
                         auto consensusBranchId = CurrentEpochBranchId(stakeParams.blkHeight, Params().GetConsensus());
 
@@ -191,54 +209,75 @@ bool ValidateStakeTransaction(const CTransaction &stakeTx, CStakeParams &stakePa
     return false;
 }
 
-bool MakeGuardedOutput(CAmount value, CPubKey &dest, CTransaction &stakeTx, CTxOut &vout)
+bool MakeGuardedOutput(CAmount value, CTxDestination &dest, CTransaction &stakeTx, CTxOut &vout)
 {
-    CCcontract_info *cp, C;
-    cp = CCinit(&C,EVAL_STAKEGUARD);
-
-    CPubKey ccAddress = CPubKey(ParseHex(cp->CChexstr));
-
-    // return an output that is bound to the stake transaction and can be spent by presenting either a signed condition by the original 
-    // destination address or a properly signed stake transaction of the same utxo on a fork
-    vout = MakeCC1of2vout(EVAL_STAKEGUARD, value, dest, ccAddress);
-
-    std::vector<CTxDestination> vKeys;
-    vKeys.push_back(dest);
-    vKeys.push_back(ccAddress);
-    
-    std::vector<std::vector<unsigned char>> vData = std::vector<std::vector<unsigned char>>();
-
-    CVerusHashWriter hw = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
-
-    hw << stakeTx.vin[0].prevout.hash;
-    hw << stakeTx.vin[0].prevout.n;
-
-    uint256 utxo = hw.GetHash();
-    vData.push_back(std::vector<unsigned char>(utxo.begin(), utxo.end()));
-
     CStakeParams p;
-    if (GetStakeParams(stakeTx, p))
+    if (GetStakeParams(stakeTx, p) && p.IsValid())
     {
-        // prev block hash and height is here to make validation easy
-        vData.push_back(std::vector<unsigned char>(p.prevHash.begin(), p.prevHash.end()));
-        std::vector<unsigned char> height = std::vector<unsigned char>(4);
-        for (int i = 0; i < 4; i++)
+        CVerusHashWriter hw = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+
+        hw << stakeTx.vin[0].prevout.hash;
+        hw << stakeTx.vin[0].prevout.n;
+
+        uint256 utxo = hw.GetHash();
+
+        if (p.Version() >= p.VERSION_EXTENDED_STAKE)
         {
-            height[i] = (p.blkHeight >> (8 * i)) & 0xff;
+            CCcontract_info *cp, C;
+            cp = CCinit(&C,EVAL_STAKEGUARD);
+
+            CStakeInfo stakeInfo(p.blkHeight, p.srcHeight, utxo, p.prevHash);
+
+            std::vector<CTxDestination> dests1({dest});
+            CConditionObj<CStakeInfo> primary(EVAL_STAKEGUARD, dests1, 1, &stakeInfo);
+            std::vector<CTxDestination> dests2({CTxDestination(CPubKey(ParseHex(cp->CChexstr)))});
+            CConditionObj<CStakeInfo> cheatCatcher(EVAL_STAKEGUARD, dests2, 1);
+
+            std::vector<CTxDestination> indexDests;
+
+            vout = CTxOut(value, MakeMofNCCScript(1, primary, cheatCatcher));
         }
-        vData.push_back(height);
+        else if (dest.which() == COptCCParams::ADDRTYPE_PK)
+        {
+            CCcontract_info *cp, C;
+            cp = CCinit(&C,EVAL_STAKEGUARD);
 
-        COptCCParams ccp = COptCCParams(COptCCParams::VERSION_V1, EVAL_STAKEGUARD, 1, 2, vKeys, vData);
+            CPubKey ccAddress = CPubKey(ParseHex(cp->CChexstr));
 
-        vout.scriptPubKey << ccp.AsVector() << OP_DROP;
+            // return an output that is bound to the stake transaction and can be spent by presenting either a signed condition by the original 
+            // destination address or a properly signed stake transaction of the same utxo on a fork
+            vout = MakeCC1of2vout(EVAL_STAKEGUARD, value, boost::apply_visitor<GetPubKeyForPubKey>(GetPubKeyForPubKey(), dest), ccAddress);
+
+            std::vector<CTxDestination> vKeys;
+            vKeys.push_back(dest);
+            vKeys.push_back(ccAddress);
+            
+            std::vector<std::vector<unsigned char>> vData = std::vector<std::vector<unsigned char>>();
+
+            vData.push_back(std::vector<unsigned char>(utxo.begin(), utxo.end()));
+
+            // prev block hash and height is here to make validation easy
+            vData.push_back(std::vector<unsigned char>(p.prevHash.begin(), p.prevHash.end()));
+            std::vector<unsigned char> height = std::vector<unsigned char>(4);
+            for (int i = 0; i < 4; i++)
+            {
+                height[i] = (p.blkHeight >> (8 * i)) & 0xff;
+            }
+            vData.push_back(height);
+
+            COptCCParams ccp = COptCCParams(COptCCParams::VERSION_V1, EVAL_STAKEGUARD, 1, 2, vKeys, vData);
+
+            vout.scriptPubKey << ccp.AsVector() << OP_DROP;
+        }
+        
         return true;
     }
     return false;
 }
 
 // validates if a stake transaction is both valid and cheating, defined by:
-// the same exact utxo source, a target block height of later than that of this tx that is also targeting a fork
-// of the chain. we know the transaction is a coinbase
+// the same exact utxo source, a target block height of later than that of the provided coinbase tx that is also targeting a fork
+// of the chain. the source transaction must be a coinbase
 bool ValidateMatchingStake(const CTransaction &ccTx, uint32_t voutNum, const CTransaction &stakeTx, bool &cheating)
 {
     // an invalid or non-matching stake transaction cannot cheat
@@ -257,10 +296,35 @@ bool ValidateMatchingStake(const CTransaction &ccTx, uint32_t voutNum, const CTr
             if (ccTx.vout[voutNum].scriptPubKey.IsPayToCryptoCondition(&dummy, vParams) && vParams.size() > 0)
             {
                 COptCCParams ccp = COptCCParams(vParams[0]);
-                if (ccp.IsValid() & ccp.vData.size() >= 3 && ccp.vData[2].size() <= 4)
-                {
-                    CVerusHashWriter hw = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
+                CVerusHashWriter hw = CVerusHashWriter(SER_GETHASH, PROTOCOL_VERSION);
 
+                if (p.version >= p.VERSION_EXTENDED_STAKE && ccp.version >= ccp.VERSION_V3 && ccp.vData.size())
+                {
+                    CStakeInfo stakeInfo(ccp.vData[0]);
+                    hw << stakeTx.vin[0].prevout.hash;
+                    hw << stakeTx.vin[0].prevout.n;
+                    uint256 utxo = hw.GetHash();
+
+                    if (utxo == stakeInfo.utxo)
+                    {
+                        if (p.prevHash != stakeInfo.prevHash && p.blkHeight >= stakeInfo.height)
+                        {
+                            cheating = true;
+                            return true;
+                        }
+                        // if block height is equal and we are at the else, prevHash must have been equal
+                        else if (p.blkHeight >= stakeInfo.height)
+                        {
+                            return true;                            
+                        }
+                    }
+                }
+                else if (p.version < p.VERSION_EXTENDED_STAKE &&
+                         ccp.version < ccp.VERSION_V3 &&
+                         ccp.IsValid() &&
+                         ccp.vData.size() >= 3 && 
+                         ccp.vData[2].size() <= 4)
+                {
                     hw << stakeTx.vin[0].prevout.hash;
                     hw << stakeTx.vin[0].prevout.n;
                     uint256 utxo = hw.GetHash();
@@ -319,6 +383,46 @@ bool MakeCheatEvidence(CMutableTransaction &mtx, const CTransaction &ccTx, uint3
         mtx.vout.push_back(vOut);
     }
     return isCheater;
+}
+
+// a version 3 guard output should be a 1 of 2 meta condition, with both of the
+// conditions being stakeguard only and one of the conditions being sent to the public
+// stakeguard destination. Only for smart transaction V3 and beyond.
+bool PrecheckStakeGuardOutput(const CTransaction &tx, int32_t outNum, CValidationState &state, uint32_t height)
+{
+    if (CConstVerusSolutionVector::GetVersionByHeight(height) < CActivationHeight::ACTIVATE_EXTENDEDSTAKE)
+    {
+        return true;
+    }
+
+    // ensure that we have all required spend conditions for primary, revocation, and recovery
+    // if there are additional spend conditions, their addition or removal is checked for validity
+    // depending on which of the mandatory spend conditions is authorized.
+    COptCCParams p, master, secondary;
+
+    CCcontract_info *cp, C;
+    cp = CCinit(&C,EVAL_STAKEGUARD);
+    CPubKey defaultPubKey(ParseHex(cp->CChexstr));
+
+    if (tx.vout[outNum].scriptPubKey.IsPayToCryptoCondition(p) &&
+        p.IsValid() &&
+        p.version >= p.VERSION_V3 &&
+        p.evalCode == EVAL_STAKEGUARD &&
+        p.vData.size() == 3 &&
+        (master = COptCCParams(p.vData.back())).IsValid() &&
+        master.evalCode == 0 &&
+        master.m == 1 &&
+        (secondary = COptCCParams(p.vData[1])).IsValid() &&
+        secondary.evalCode == EVAL_STAKEGUARD &&
+        secondary.m == 1 &&
+        secondary.n == 1 &&
+        secondary.vKeys.size() == 1 &&
+        secondary.vKeys[0].which() == COptCCParams::ADDRTYPE_PK &&
+        GetDestinationBytes(secondary.vKeys[0]) == GetDestinationBytes(defaultPubKey))
+    {
+        return true;
+    }
+    return false;
 }
 
 typedef struct ccFulfillmentCheck {
@@ -389,63 +493,115 @@ bool StakeGuardValidate(struct CCcontract_info *cp, Eval* eval, const CTransacti
 
     CC *cc = GetCryptoCondition(tx.vin[nIn].scriptSig);
 
-    if (cc)
+    // tx is the spending tx, the cc transaction comes back in txOut
+    bool validCCParams = GetCCParams(eval, tx, nIn, txOut, preConditions, params);
+    COptCCParams ccp;
+    if (preConditions.size() > 0)
     {
-        COptCCParams ccp;
+        ccp = COptCCParams(preConditions[0]);
+    }
+
+    if (validCCParams && ccp.IsValid() && ((cc && ccp.version < COptCCParams::VERSION_V3) || (!cc && ccp.version >= COptCCParams::VERSION_V3)))
+    {
         signedByFirstKey = false;
         validCheat = false;
 
-        // tx is the spending tx, the cc transaction comes back in txOut
-        if (GetCCParams(eval, tx, nIn, txOut, preConditions, params))
+        if (ccp.version >= COptCCParams::VERSION_V3)
         {
-            if (preConditions.size() > 0)
+            CPubKey defaultPubKey(ParseHex(cp->CChexstr));
+
+            CSmartTransactionSignatures smartSigs;
+            bool signedByDefaultKey = false;
+            std::vector<unsigned char> ffVec = GetFulfillmentVector(tx.vin[nIn].scriptSig);
+            smartSigs = CSmartTransactionSignatures(std::vector<unsigned char>(ffVec.begin(), ffVec.end()));
+            CKeyID checkKeyID = defaultPubKey.GetID();
+            for (auto &keySig : smartSigs.signatures)
             {
-                ccp = COptCCParams(preConditions[0]);
+                CPubKey thisKey;
+                thisKey.Set(keySig.second.pubKeyData.begin(), keySig.second.pubKeyData.end());
+                if (thisKey.GetID() == checkKeyID)
+                {
+                    signedByDefaultKey = true;
+                    break;
+                }
             }
 
-            if (ccp.IsValid() && ccp.m == 1 && ccp.n == 2 && ccp.vKeys.size() == 2)
+            // if we don't have enough signatures to satisfy conditions,
+            // it will fail before we check this. that means if it is not signed
+            // by the default key, it must be signed / fulfilled by the alternate, which is
+            // the first condition/key/identity
+            signedByFirstKey = fulfilled || !signedByDefaultKey;
+
+            if (!signedByFirstKey && 
+                params.size() == 2 &&
+                params[0].size() > 0 && 
+                params[0][0] == OPRETTYPE_STAKECHEAT)
             {
-                std::vector<uint32_t> vc = {0, 0};
-
-                std::vector<CPubKey> keys;
-                for (auto pk : ccp.vKeys)
+                CDataStream s = CDataStream(std::vector<unsigned char>(params[1].begin(), params[1].end()), SER_DISK, PROTOCOL_VERSION);
+                bool checkOK = false;
+                CTransaction cheatTx;
+                try
                 {
-                    uint160 keyID = GetDestinationID(pk);
-                    std::vector<unsigned char> vkch = GetDestinationBytes(pk);
-                    if (vkch.size() == 33)
-                    {
-                        keys.push_back(CPubKey(vkch));
-                    }
+                    cheatTx.Unserialize(s);
+                    checkOK = true;
                 }
-
-                if (keys.size() == 2)
+                catch (...)
                 {
-                    ccFulfillmentCheck fc = {keys, vc};
+                }
+                if (checkOK && !ValidateMatchingStake(txOut, tx.vin[0].prevout.n, cheatTx, validCheat))
+                {
+                    validCheat = false;
+                }
+            }
+        }
+        else if (ccp.m == 1 && ccp.n == 2 && ccp.vKeys.size() == 2)
+        {
+            std::vector<uint32_t> vc = {0, 0};
+            std::vector<CPubKey> keys;
 
-                    signedByFirstKey = (IsCCFulfilled(cc, &fc) != 0);
+            for (auto pk : ccp.vKeys)
+            {
+                uint160 keyID = GetDestinationID(pk);
+                std::vector<unsigned char> vkch = GetDestinationBytes(pk);
+                if (vkch.size() == 33)
+                {
+                    keys.push_back(CPubKey(vkch));
+                }
+            }
 
-                    if ((!signedByFirstKey && ccp.evalCode == EVAL_STAKEGUARD && ccp.vKeys.size() == 2 && ccp.version == COptCCParams::VERSION_V1) &&
-                        params.size() == 2 && params[0].size() > 0 && params[0][0] == OPRETTYPE_STAKECHEAT)
+            if (keys.size() == 2)
+            {
+                ccFulfillmentCheck fc = {keys, vc};
+                signedByFirstKey = (IsCCFulfilled(cc, &fc) != 0);
+
+                if (!signedByFirstKey && 
+                    ccp.evalCode == EVAL_STAKEGUARD && 
+                    ccp.vKeys.size() == 2 &&
+                    params.size() == 2 &&
+                    params[0].size() > 0 && 
+                    params[0][0] == OPRETTYPE_STAKECHEAT)
+                {
+                    CDataStream s = CDataStream(std::vector<unsigned char>(params[1].begin(), params[1].end()), SER_DISK, PROTOCOL_VERSION);
+                    bool checkOK = false;
+                    CTransaction cheatTx;
+                    try
                     {
-                        CDataStream s = CDataStream(std::vector<unsigned char>(params[1].begin(), params[1].end()), SER_DISK, PROTOCOL_VERSION);
-                        bool checkOK = false;
-                        CTransaction cheatTx;
-                        try
-                        {
-                            cheatTx.Unserialize(s);
-                            checkOK = true;
-                        }
-                        catch (...)
-                        {
-                        }
-                        if (checkOK && !ValidateMatchingStake(txOut, tx.vin[0].prevout.n, cheatTx, validCheat))
-                        {
-                            validCheat = false;
-                        }
+                        cheatTx.Unserialize(s);
+                        checkOK = true;
+                    }
+                    catch (...)
+                    {
+                    }
+                    if (checkOK && !ValidateMatchingStake(txOut, tx.vin[0].prevout.n, cheatTx, validCheat))
+                    {
+                        validCheat = false;
                     }
                 }
             }
         }
+    }
+    if (cc)
+    {
         cc_free(cc);
     }
     if (!(signedByFirstKey || validCheat))

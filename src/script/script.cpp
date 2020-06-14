@@ -13,6 +13,7 @@
 #include "standard.h"
 #include "pbaas/reserves.h"
 #include "key_io.h"
+#include "univalue.h"
 #include "pbaas/identity.h"
 
 using namespace std;
@@ -180,6 +181,107 @@ uint160 GetConditionID(uint160 cid, int32_t condition)
     hw << cid;
     uint256 chainHash = hw.GetHash();
     return Hash160(chainHash.begin(), chainHash.end());
+}
+
+CTxDestination TransferDestinationToDestination(const CTransferDestination &transferDest)
+{
+    CTxDestination retDest;
+    switch (transferDest.type)
+    {
+    case CTransferDestination::DEST_PKH:
+        retDest = CKeyID(uint160(transferDest.destination));
+        break;
+
+    case CTransferDestination::DEST_PK:
+        {
+            CPubKey pk;
+            pk.Set(transferDest.destination.begin(), transferDest.destination.end());
+            retDest = pk;
+            break;
+        }
+
+    case CTransferDestination::DEST_SH:
+        retDest = CScriptID(uint160(transferDest.destination));
+        break;
+
+    case CTransferDestination::DEST_ID:
+        retDest = CIdentityID(uint160(transferDest.destination));
+        break;
+
+    case CTransferDestination::DEST_FULLID:
+        retDest = CIdentityID(CIdentity(transferDest.destination).GetID());
+        break;
+
+    case CTransferDestination::DEST_QUANTUM:
+        retDest = CQuantumID(uint160(transferDest.destination));
+        break;
+    }
+    return retDest;
+}
+
+CTransferDestination DestinationToTransferDestination(const CTxDestination &dest)
+{
+    CTransferDestination retDest;
+    switch (dest.which())
+    {
+    case CTransferDestination::DEST_PKH:
+    case CTransferDestination::DEST_PK:
+    case CTransferDestination::DEST_SH:
+    case CTransferDestination::DEST_ID:
+    case CTransferDestination::DEST_QUANTUM:
+        retDest = CTransferDestination(dest.which(), GetDestinationBytes(dest));
+        break;
+    }
+    return retDest;
+}
+
+CTransferDestination IdentityToTransferDestination(const CIdentity &identity)
+{
+    return CTransferDestination(CTransferDestination::DEST_FULLID, ::AsVector(identity));
+}
+
+CIdentity TransferDestinationToIdentity(const CTransferDestination &dest)
+{
+    CIdentity retIdentity;
+    switch (dest.type)
+    {
+        case CTransferDestination::DEST_FULLID:
+        {
+            ::FromVector(dest.destination, retIdentity);
+            break;
+        }        
+    }
+    return retIdentity;
+}
+
+std::vector<CTxDestination> TransferDestinationsToDestinations(const std::vector<CTransferDestination> &transferDests)
+{
+    std::vector<CTxDestination> retDests;
+    for (auto &dest : transferDests)
+    {
+        retDests.push_back(TransferDestinationToDestination(dest));
+    }
+    return retDests;
+}
+
+std::vector<CTransferDestination> DestinationsToTransferDestinations(const std::vector<CTxDestination> &dests)
+{
+    std::vector<CTransferDestination> retDests;
+    for (auto &dest : dests)
+    {
+        retDests.push_back(DestinationToTransferDestination(dest));
+    }
+    return retDests;
+}
+
+CStakeInfo::CStakeInfo(std::vector<unsigned char> vch)
+{
+    ::FromVector(vch, *this);
+}
+
+std::vector<unsigned char> CStakeInfo::AsVector() const
+{
+    return ::AsVector(*this);
 }
 
 unsigned int CScript::MAX_SCRIPT_ELEMENT_SIZE = MAX_SCRIPT_ELEMENT_SIZE_V2;
@@ -401,7 +503,7 @@ bool CScript::IsInstantSpend() const
 {
     COptCCParams p;
     bool isInstantSpend = false;
-    if (!_IsVerusActive() && IsPayToCryptoCondition(p))
+    if (!_IsVerusActive() && IsPayToCryptoCondition(p) && p.IsValid())
     {
         // instant spends must be to expected instant spend crypto conditions and to the right address as well
         if ((p.evalCode == EVAL_EARNEDNOTARIZATION && GetDestinationID(p.vKeys[0]) == GetConditionID(VERUS_CHAINID, p.evalCode)) || 
@@ -481,55 +583,128 @@ CScript &CScript::ReplaceCCParams(const COptCCParams &params)
     return *this;
 }
 
-int64_t CScript::ReserveOutValue(COptCCParams &p) const
+bool CScript::IsSpendableOutputType(const COptCCParams &p) const
 {
-    CAmount newVal = 0;
+    bool isSpendable = true;
+    if (!p.IsValid())
+    {
+        return isSpendable;
+    }
+    switch (p.evalCode)
+    {
+        case EVAL_CURRENCYSTATE:
+        case EVAL_RESERVE_TRANSFER:
+        case EVAL_RESERVE_EXCHANGE:
+        case EVAL_CROSSCHAIN_IMPORT:
+        case EVAL_IDENTITY_COMMITMENT:
+        case EVAL_IDENTITY_PRIMARY:
+        case EVAL_IDENTITY_REVOKE:
+        case EVAL_IDENTITY_RECOVER:
+        case EVAL_IDENTITY_RESERVATION:
+        {
+            isSpendable = false;
+            break;
+        }
+    }
+    return isSpendable;
+}
 
-    // reserve out value must be the same as native on a Verus chain
+bool CScript::IsSpendableOutputType() const
+{
+    COptCCParams p;
+    if (IsPayToCryptoCondition(p))
+    {
+        return IsSpendableOutputType(p);
+    }
+    // default for non-CC outputs is true, this is to protect from accidentally spending specific CC output types, 
+    // even though they could be spent
+    return true;
+}
+
+CCurrencyValueMap CScript::ReserveOutValue(COptCCParams &p, bool spendableOnly) const
+{
+    CCurrencyValueMap retVal;
 
     // already validated above
-    if (::IsPayToCryptoCondition(*this, p) && p.IsValid())
+    if (IsPayToCryptoCondition(p) && p.IsValid() && (!spendableOnly || IsSpendableOutputType(p)))
     {
         switch (p.evalCode)
         {
             case EVAL_RESERVE_OUTPUT:
             {
-                CReserveOutput ro(p.vData[0]);
-                return ro.nValue;
+                CTokenOutput ro(p.vData[0]);
+                if (ro.nValue)
+                {
+                    retVal.valueMap[ro.currencyID] = ro.nValue;
+                }
                 break;
             }
+
+            case EVAL_RESERVE_DEPOSIT:
+            {
+                CTokenOutput ro(p.vData[0]);
+                if (ro.nValue)
+                {
+                    retVal.valueMap[ro.currencyID] = ro.nValue;
+                }
+                break;
+            }
+
             case EVAL_CURRENCYSTATE:
             {
                 CCoinbaseCurrencyState cbcs(p.vData[0]);
-                return cbcs.ReserveOut.nValue;
+                for (int i = 0; i < cbcs.currencies.size(); i++)
+                {
+                    if (cbcs.reserveOut[i])
+                    {
+                        retVal.valueMap[cbcs.currencies[i]] = cbcs.reserveOut[i];
+                    }
+                }
                 break;
             }
+
             case EVAL_RESERVE_TRANSFER:
             {
                 CReserveTransfer rt(p.vData[0]);
-                return rt.nValue + rt.nFees;
+                // this currency can only be present as native
+                if (!(rt.flags & (rt.MINT_CURRENCY | rt.PREALLOCATE)) && rt.currencyID != ASSETCHAINS_CHAINID)
+                {
+                    retVal.valueMap[rt.currencyID] = rt.nValue + rt.nFees;
+                }
                 break;
             }
+
             case EVAL_RESERVE_EXCHANGE:
             {
                 CReserveExchange re(p.vData[0]);
                 // reserve out amount when converting to reserve is 0, since the amount cannot be calculated in isolation as an input
                 // if reserve in, we can consider the output the same reserve value as the input
-                return (re.flags & re.TO_RESERVE) ? 0 : re.nValue;
+                if (!(re.flags & re.TO_RESERVE))
+                {
+                    retVal.valueMap[re.currencyID] = re.nValue;
+                }
+                break;
+            }
+            case EVAL_CROSSCHAIN_IMPORT:
+            {
+                CCrossChainImport cci(p.vData[0]);
+                // reserve out amount when converting to reserve is 0, since the amount cannot be calculated in isolation as an input
+                // if reserve in, we can consider the output the same reserve value as the input
+                retVal = cci.totalReserveOutMap;
                 break;
             }
         }
     }
-    return 0;
+    return retVal;
 }
 
-int64_t CScript::ReserveOutValue() const
+CCurrencyValueMap CScript::ReserveOutValue() const
 {
     COptCCParams p;
     return ReserveOutValue(p);
 }
 
-bool CScript::SetReserveOutValue(int64_t newValue)
+bool CScript::SetReserveOutValue(const CCurrencyValueMap &newValues)
 {
     COptCCParams p;
     CAmount newVal = 0;
@@ -541,28 +716,44 @@ bool CScript::SetReserveOutValue(int64_t newValue)
         {
             case EVAL_RESERVE_OUTPUT:
             {
-                CReserveOutput ro(p.vData[0]);
+                if (newValues.valueMap.size() != 1)
+                {
+                    return false;
+                }
+                CTokenOutput ro(p.vData[0]);
+                ro.currencyID = newValues.valueMap.begin()->first;
+                ro.nValue = newValues.valueMap.begin()->second;
                 p.vData[0] = ro.AsVector();
                 break;
             }
             case EVAL_RESERVE_TRANSFER:
             {
+                if (newValues.valueMap.size() != 1)
+                {
+                    return false;
+                }
                 CReserveTransfer rt(p.vData[0]);
-                rt.nValue = newValue;
+                rt.currencyID = newValues.valueMap.begin()->first;
+                rt.nValue = newValues.valueMap.begin()->second;
                 p.vData[0] = rt.AsVector();
                 break;
             }
             case EVAL_RESERVE_EXCHANGE:
             {
+                if (newValues.valueMap.size() != 1)
+                {
+                    return false;
+                }
                 CReserveExchange re(p.vData[0]);
-                re.nValue = newValue;
+                re.currencyID = newValues.valueMap.begin()->first;
+                re.nValue = newValues.valueMap.begin()->second;
                 p.vData[0] = re.AsVector();
                 break;
             }
             case EVAL_CROSSCHAIN_IMPORT:
             {
                 CCrossChainImport cci(p.vData[0]);
-                cci.nValue = newValue;
+                cci.importValue = newValues;
                 p.vData[0] = cci.AsVector();
                 break;
             }
@@ -570,7 +761,14 @@ bool CScript::SetReserveOutValue(int64_t newValue)
             case EVAL_CURRENCYSTATE:
             {
                 CCoinbaseCurrencyState cbcs(p.vData[0]);
-                cbcs.ReserveOut.nValue = newValue;
+                for (int i = 0; i < cbcs.currencies.size(); i++)
+                {
+                    auto it = newValues.valueMap.find(cbcs.currencies[i]);
+                    if (it != newValues.valueMap.end())
+                    {
+                        cbcs.reserveOut[i] = it->second;
+                    }
+                }
                 p.vData[0] = cbcs.AsVector();
                 break;
             }
@@ -773,7 +971,19 @@ std::vector<CTxDestination> CScript::GetDestinations() const
 {
     std::vector<CTxDestination> destinations;
     COptCCParams p;
-    if (this->IsPayToScriptHash()) {
+    if (this->IsPayToCryptoCondition(p))
+    {
+        if (p.IsValid() && (p.vKeys.size()))
+        {
+            destinations = p.GetDestinations();
+        }
+        else
+        {
+            vector<unsigned char> hashBytes(this->begin(), this->end());
+            destinations.push_back(CKeyID(Hash160(hashBytes)));
+        }
+    }
+    else if (this->IsPayToScriptHash()) {
         destinations.push_back(CScriptID(uint160(std::vector<unsigned char>(this->begin()+2, this->begin()+22))));
     }
     else if (this->IsPayToPublicKeyHash())
@@ -785,55 +995,6 @@ std::vector<CTxDestination> CScript::GetDestinations() const
         std::vector<unsigned char> hashBytes(this->begin()+1, this->begin()+34);
         destinations.push_back(CPubKey(hashBytes));
     }
-    else if (this->IsPayToCryptoCondition(p))
-    {
-        if (p.IsValid() && (p.vKeys.size()))
-        {
-            COptCCParams master;
-            if (p.version >= p.VERSION_V3 && p.vData.size() > 1 && (master = COptCCParams(p.vData.back())).IsValid())
-            {
-                std::set<CTxDestination> dests;
-                for (auto dest : master.vKeys)
-                {
-                    dests.insert(dest);
-                }
-                for (auto dest : p.vKeys)
-                {
-                    if (dest.which() == COptCCParams::ADDRTYPE_ID)
-                    {
-                        dests.insert(dest);
-                    }
-                }
-                for (int i = 1; i < (int)(p.vData.size() - 1); i++)
-                {
-                    COptCCParams oneP(p.vData[i]);
-                    if (oneP.IsValid())
-                    {
-                        for (auto dest : oneP.vKeys)
-                        {
-                            if (dest.which() == COptCCParams::ADDRTYPE_ID)
-                            {
-                                dests.insert(dest);
-                            }
-                        }
-                    }
-                }
-                for (auto dest : dests)
-                {
-                    destinations.push_back(dest);
-                }
-            }
-            else
-            {
-                destinations.push_back(p.vKeys[0]);
-            }
-        }
-        else
-        {
-            vector<unsigned char> hashBytes(this->begin(), this->end());
-            destinations.push_back(CKeyID(Hash160(hashBytes)));
-        }
-    }
     return destinations;
 }
 
@@ -843,3 +1004,323 @@ uint160 GetNameID(const std::string &Name, const uint160 &parent)
     return CIdentity::GetID(Name, writeable);
 }
 
+CAmount AmountFromValueNoErr(const UniValue& value)
+{
+    try
+    {
+        CAmount amount;
+        if (!value.isNum() && !value.isStr())
+        {
+            amount = 0;
+        }
+        else if (!ParseFixedPoint(value.getValStr(), 8, &amount))
+        {
+            amount = 0;
+        }
+        else if (!MoneyRange(amount))
+        {
+            amount = 0;
+        }
+        return amount;
+    }
+    catch(const std::exception& e)
+    {
+        return 0;
+    }
+}
+
+CCurrencyValueMap::CCurrencyValueMap(const std::vector<uint160> &currencyIDs, const std::vector<CAmount> &amounts)
+{
+    int commonNum = currencyIDs.size() >= amounts.size() ? amounts.size() : currencyIDs.size();
+    for (int i = 0; i < commonNum; i++)
+    {
+        valueMap[currencyIDs[i]] = amounts[i];
+    }
+}
+
+bool operator<(const CCurrencyValueMap& a, const CCurrencyValueMap& b)
+{
+    // to be less than means, in this order:
+    // 1. To have fewer non-zero currencies.
+    // 2. If not fewer currencies, to be unable to be subtracted from the one being checked
+    //    without creating negative values
+    if (!a.valueMap.size() && !b.valueMap.size())
+    {
+        return false;
+    }
+    bool isaltb = false;
+
+    for (auto &oneVal : b.valueMap)
+    {
+        if (oneVal.second)
+        {
+            auto it = a.valueMap.find(oneVal.first);
+            if (it == a.valueMap.end() || it->second < oneVal.second)
+            {
+                isaltb = true;
+            }
+        }
+    }
+    return isaltb;
+}
+
+bool operator>(const CCurrencyValueMap& a, const CCurrencyValueMap& b)
+{
+    return b < a;
+}
+
+bool operator==(const CCurrencyValueMap& a, const CCurrencyValueMap& b)
+{
+    if (a.valueMap.size() != b.valueMap.size())
+    {
+        return false;
+    }
+
+    bool isaeqb = true;
+    for (auto &oneVal : a.valueMap)
+    {
+        auto it = b.valueMap.find(oneVal.first);
+        if (it == b.valueMap.end() || it->second != oneVal.second)
+        {
+            isaeqb = false;
+            break;
+        }
+    }
+    return isaeqb;
+}
+
+bool operator!=(const CCurrencyValueMap& a, const CCurrencyValueMap& b)
+{
+    return !(a == b);
+}
+
+bool operator<=(const CCurrencyValueMap& a, const CCurrencyValueMap& b)
+{
+    return (a < b) || (a == b);
+}
+
+bool operator>=(const CCurrencyValueMap& a, const CCurrencyValueMap& b)
+{
+    return b <= a;
+}
+
+CCurrencyValueMap operator+(const CCurrencyValueMap& a, const CCurrencyValueMap& b)
+{
+    CCurrencyValueMap retVal = a;
+    if (a.valueMap.size() || b.valueMap.size())
+    {
+        for (auto &oneVal : b.valueMap)
+        {
+            auto it = retVal.valueMap.find(oneVal.first);
+            if (it == retVal.valueMap.end())
+            {
+                retVal.valueMap[oneVal.first] = oneVal.second;
+            }
+            else
+            {
+                it->second += oneVal.second;
+            }
+        }
+    }
+    return retVal;
+}
+
+CCurrencyValueMap operator-(const CCurrencyValueMap& a, const CCurrencyValueMap& b)
+{
+    CCurrencyValueMap retVal = a;
+    if (a.valueMap.size() || b.valueMap.size())
+    {
+        for (auto &oneVal : b.valueMap)
+        {
+            auto it = retVal.valueMap.find(oneVal.first);
+            if (it == retVal.valueMap.end())
+            {
+                retVal.valueMap[oneVal.first] = -oneVal.second;
+            }
+            else
+            {
+                it->second -= oneVal.second;
+            }
+        }
+    }
+    return retVal;
+}
+
+CCurrencyValueMap operator+(const CCurrencyValueMap& a, int b)
+{
+    CCurrencyValueMap retVal = a;
+    for (auto &oneVal : retVal.valueMap)
+    {
+        oneVal.second += b;
+    }
+    return retVal;
+}
+
+CCurrencyValueMap operator-(const CCurrencyValueMap& a, int b)
+{
+    CCurrencyValueMap retVal = a;
+    for (auto &oneVal : retVal.valueMap)
+    {
+        oneVal.second -= b;
+    }
+    return retVal;
+}
+
+CCurrencyValueMap operator*(const CCurrencyValueMap& a, int b)
+{
+    CCurrencyValueMap retVal = a;
+    for (auto &oneVal : retVal.valueMap)
+    {
+        oneVal.second *= b;
+    }
+    return retVal;
+}
+
+const CCurrencyValueMap &CCurrencyValueMap::operator-=(const CCurrencyValueMap& operand)
+{
+    return *this = *this - operand;
+}
+
+const CCurrencyValueMap &CCurrencyValueMap::operator+=(const CCurrencyValueMap& operand)
+{
+    return *this = *this + operand;
+}
+
+// determine if the operand intersects this map
+bool CCurrencyValueMap::Intersects(const CCurrencyValueMap& operand) const
+{
+    bool retVal = false;
+
+    if (valueMap.size() && operand.valueMap.size())
+    {
+        for (auto &oneVal : valueMap)
+        {
+            auto it = operand.valueMap.find(oneVal.first);
+            if (it != operand.valueMap.end())
+            {
+                if (it->second > 0 && oneVal.second > 0)
+                {
+                    retVal = true;
+                    break;
+                }
+            }
+        }
+    }
+    return retVal;
+}
+
+CCurrencyValueMap CCurrencyValueMap::IntersectingValues(const CCurrencyValueMap& operand) const
+{
+    CCurrencyValueMap retVal;
+
+    if (valueMap.size() && operand.valueMap.size())
+    {
+        for (auto &oneVal : valueMap)
+        {
+            auto it = operand.valueMap.find(oneVal.first);
+            if (it != operand.valueMap.end() &&
+                it->second != 0 && 
+                oneVal.second != 0)
+            {
+                retVal.valueMap[oneVal.first] = oneVal.second;
+            }
+        }
+    }
+    return retVal;
+}
+
+CCurrencyValueMap CCurrencyValueMap::CanonicalMap() const
+{
+    CCurrencyValueMap retVal;
+    for (auto valPair : valueMap)
+    {
+        if (valPair.second != 0)
+        {
+            retVal.valueMap.insert(valPair);
+        }
+    }
+    return retVal;
+}
+
+CCurrencyValueMap CCurrencyValueMap::NonIntersectingValues(const CCurrencyValueMap& operand) const
+{
+    CCurrencyValueMap retVal = operand;
+
+    if (valueMap.size() && operand.valueMap.size())
+    {
+        for (auto &oneVal : valueMap)
+        {
+            auto it = operand.valueMap.find(oneVal.first);
+            if (it != operand.valueMap.end())
+            {
+                if (it->second > 0 && oneVal.second > 0)
+                {
+                    retVal.valueMap.erase(it);
+                }
+            }
+        }
+    }
+    return retVal;
+}
+
+bool CCurrencyValueMap::IsValid() const
+{
+    for (auto &oneVal : valueMap)
+    {
+        if (oneVal.first.IsNull())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool CCurrencyValueMap::HasNegative() const
+{
+    for (auto &oneVal : valueMap)
+    {
+        if (oneVal.second < 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// subtract, but do not subtract to negative values
+CCurrencyValueMap CCurrencyValueMap::SubtractToZero(const CCurrencyValueMap& operand) const
+{
+    CCurrencyValueMap retVal = *this;
+    std::vector<uint160> toRemove;
+    if (valueMap.size() && operand.valueMap.size())
+    {
+        for (auto &oneVal : retVal.valueMap)
+        {
+            auto it = operand.valueMap.find(oneVal.first);
+            if (it != operand.valueMap.end())
+            {
+                oneVal.second = oneVal.second - it->second;
+                if (oneVal.second <= 0)
+                {
+                    toRemove.push_back(oneVal.first);
+                }
+            }
+        }
+    }
+    for (auto &toErase : toRemove)
+    {
+        retVal.valueMap.erase(toErase);
+    }
+    return retVal;
+}
+
+std::vector<CAmount> CCurrencyValueMap::AsCurrencyVector(const std::vector<uint160> &currencies) const
+{
+    std::vector<CAmount> retVal(currencies.size());
+    for (int i = 0; i < currencies.size(); i++)
+    {
+        auto it = valueMap.find(currencies[i]);
+        retVal[i] = it != valueMap.end() ? it->second : 0;
+    }
+    return retVal;
+}

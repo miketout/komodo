@@ -588,7 +588,7 @@ public:
     CAmount GetValueIn(int32_t nHeight,int64_t *interestp,const CTransaction& tx, uint32_t prevblocktime=0) const;
 
     // for fractional reserve chains only
-    CAmount GetReserveValueIn(int32_t nHeight, const CTransaction& tx) const;
+    CCurrencyValueMap GetReserveValueIn(int32_t nHeight, const CTransaction& tx) const;
 
     //! Check whether all prevouts of the transaction are present in the UTXO set represented by this view
     bool HaveInputs(const CTransaction& tx) const;

@@ -17,13 +17,14 @@
 #include "asn/Condition.h"
 #include "asn/Fulfillment.h"
 #include "asn/OCTET_STRING.h"
-#include "cryptoconditions.h"
+#include "include/cryptoconditions.h"
 #include "src/internal.h"
 #include "src/threshold.c"
 #include "src/prefix.c"
 #include "src/preimage.c"
 #include "src/ed25519.c"
 #include "src/secp256k1.c"
+#include "src/falcon512.c"
 #include "src/anon.c"
 #include "src/eval.c"
 #include "src/json_rpc.c"
@@ -39,7 +40,7 @@ struct CCType *CCTypeRegistry[] = {
     NULL, /* &CC_rsaType */
     &CC_Ed25519Type,
     &CC_Secp256k1Type,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, /* 6-14 unused */
+    &CC_Falcon512Type, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, /* 6-14 unused */
     &CC_EvalType
 };
 
@@ -122,14 +123,21 @@ uint32_t fromAsnSubtypes(const ConditionTypes_t types) {
 
 size_t cc_conditionBinary(const CC *cond, unsigned char *buf, int bufLen) {
     Condition_t *asn = calloc(1, sizeof(Condition_t));
-    asnCondition(cond, asn);
-    asn_enc_rval_t rc = der_encode_to_buffer(&asn_DEF_Condition, asn, buf, bufLen);
-    if (rc.encoded == -1) {
-        fprintf(stderr, "CONDITION NOT ENCODED\n");
-        return 0;
+    bool r = asnCondition(cond, asn);
+    size_t out = 0;
+    if (r)
+    {
+        asn_enc_rval_t rc = der_encode_to_buffer(&asn_DEF_Condition, asn, buf, bufLen);
+        if (rc.encoded == -1) {
+            fprintf(stderr, "CONDITION NOT ENCODED\n");
+        }
+        else
+        {
+            out = rc.encoded;
+        }
     }
     ASN_STRUCT_FREE(asn_DEF_Condition, asn);
-    return rc.encoded;
+    return out;
 }
 
 
@@ -165,7 +173,7 @@ size_t cc_partialFulfillmentBinary(const CC *cond, unsigned char *buf, size_t le
 }
 
 
-void asnCondition(const CC *cond, Condition_t *asn) {
+bool asnCondition(const CC *cond, Condition_t *asn) {
     asn->present = cc_isAnon(cond) ? cond->conditionType->asnType : cond->type->asnType;
     
     // This may look a little weird - we dont have a reference here to the correct
@@ -174,8 +182,12 @@ void asnCondition(const CC *cond, Condition_t *asn) {
     CompoundSha256Condition_t *choice = &asn->choice.thresholdSha256;
     choice->cost = cc_getCost(cond);
     choice->fingerprint.buf = cond->type->fingerprint(cond);
-    choice->fingerprint.size = 32;
+    if (choice->fingerprint.buf == 0) {
+        return 0;
+    }
+    choice->fingerprint.size = 32;	    choice->fingerprint.size = 32;
     choice->subtypes = asnSubtypes(cond->type->getSubtypes(cond));
+    return 1;
 }
 
 

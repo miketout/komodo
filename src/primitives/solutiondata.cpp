@@ -34,11 +34,18 @@ void CPBaaSPreHeader::SetBlockData(CBlockHeader &bh)
     bh.nBits = nBits;
     bh.nNonce = nNonce;
     bh.hashMerkleRoot = hashMerkleRoot;
+    CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(bh.nSolution);
+    if (descr.version >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS)
+    {
+        descr.hashPrevMMRRoot = hashPrevMMRRoot;
+        descr.hashBlockMMRRoot = hashBlockMMRRoot;
+        CConstVerusSolutionVector::SetDescriptor(bh.nSolution, descr);
+    }
 }
 
-CPBaaSBlockHeader::CPBaaSBlockHeader(const uint160 &cID, const CPBaaSPreHeader &pbph, const uint256 &hashPrevMMR) : chainID(cID), hashPrevMMRRoot(hashPrevMMR)
+CPBaaSBlockHeader::CPBaaSBlockHeader(const uint160 &cID, const CPBaaSPreHeader &pbph) : chainID(cID)
 {
-    CHashWriter hw(SER_GETHASH, PROTOCOL_VERSION);
+    CBLAKE2bWriter hw(SER_GETHASH, PROTOCOL_VERSION);
 
     // all core data besides version, and solution, which are shared across all headers 
     hw << pbph;

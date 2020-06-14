@@ -53,7 +53,7 @@ TEST_F(CCTest, testMayAcceptCryptoCondition)
     { "type": "threshold-sha-256",
       "threshold": 2,
       "subfulfillments": [
-          { "type": "secp256k1-sha-256", "publicKey": "0205a8ad0c1dbc515f149af377981aab58b836af008d4d7ab21bd76faf80550b47" }
+          { "type": "falcon512-sha-256", "publicKey": "0205a8ad0c1dbc515f149af377981aab58b836af008d4d7ab21bd76faf80550b47" }
       ]
     })!!");
     ASSERT_TRUE(CCPubKey(cond).MayAcceptCryptoCondition(0));

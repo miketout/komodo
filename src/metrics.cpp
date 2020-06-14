@@ -76,15 +76,14 @@ double AtomicTimer::rate(const AtomicCounter& count)
 
 boost::synchronized_value<int64_t> nNodeStartTime;
 boost::synchronized_value<int64_t> nNextRefresh;
-int64_t nHashCount;
 AtomicCounter transactionsValidated;
 AtomicCounter ehSolverRuns;
 AtomicCounter solutionTargetChecks;
 static AtomicCounter minedBlocks;
-AtomicTimer miningTimer;
+PerfCounterTimer miningTimer;
 CCriticalSection cs_metrics;
 
-double AtomicTimer::rate(const int64_t count)
+double AtomicTimer::rate(const int64_t &count)
 {
     std::unique_lock<std::mutex> lock(mtx);
     LOCK(cs_metrics);
@@ -94,6 +93,38 @@ double AtomicTimer::rate(const int64_t count)
         duration += GetTime() - start_time;
     }
     return duration > 0 ? (double)count / duration : 0;
+}
+
+double PerfCounterTimer::rate()
+{
+    return AtomicTimer::rate(counter);
+}
+
+double PerfCounterTimer::rate(const AtomicCounter &count)
+{
+    return AtomicTimer::rate(count);
+}
+
+double PerfCounterTimer::rate(const int64_t &count)
+{
+    return AtomicTimer::rate(count);
+}
+
+void PerfCounterTimer::clear()
+{
+    std::unique_lock<std::mutex> lock(mtx);
+    if (!threads)
+    {
+        counter = 0;
+        start_time = GetTime();
+        total_time = 0;
+    }
+}
+
+int64_t PerfCounterTimer::operator+=(int64_t operand)
+{
+    std::unique_lock<std::mutex> lock(mtx);
+    return counter += operand;
 }
 
 static boost::synchronized_value<std::list<uint256>> trackedBlocks;
@@ -125,7 +156,7 @@ double GetLocalSolPS()
 {
     if (ASSETCHAINS_ALGO == ASSETCHAINS_VERUSHASH)
     {
-        return miningTimer.rate(nHashCount);
+        return miningTimer.rate();
     }
     else
         return miningTimer.rate(solutionTargetChecks);

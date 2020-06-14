@@ -29,6 +29,7 @@
 #include "utilstrencodings.h"
 
 #include <boost/filesystem/operations.hpp>
+#include <boost/format.hpp>
 #include <stdio.h>
 
 #include <event2/buffer.h>
@@ -47,6 +48,7 @@ using namespace std;
 extern string PBAAS_HOST;
 extern string PBAAS_USERPASS;
 extern int32_t PBAAS_PORT;
+extern std::string VERUS_CHAINNAME;
 
 //
 // Exception thrown on connection error.  This error is used to determine
@@ -238,7 +240,28 @@ bool uni_get_bool(UniValue uv, bool def)
 {
     try
     {
-        return uv.get_bool();
+        if (uv.isStr())
+        {
+            std::string boolStr;
+            if ((boolStr = uni_get_str(uv, def ? "true" : "false")) == "true" || boolStr == "1")
+            {
+                return true;
+            }
+            else if (boolStr == "false" || boolStr == "0")
+            {
+                return false;
+            }
+            return def;
+        }
+        else if (uv.isNum())
+        {
+            return uv.get_int() != 0;
+        }
+        else
+        {
+            return uv.get_bool();
+        }
+        return false;
     }
     catch(const std::exception& e)
     {
@@ -302,4 +325,444 @@ UniValue CCrossChainRPCData::ToUniValue() const
     obj.push_back(Pair("credentials", credentials));
     return obj;
 }
+
+CNodeData::CNodeData(const UniValue &obj)
+{
+    networkAddress = uni_get_str(find_value(obj, "networkaddress"));
+    CTxDestination dest = DecodeDestination(uni_get_str(find_value(obj, "nodeidentity")));
+    if (dest.which() != COptCCParams::ADDRTYPE_ID)
+    {
+        nodeIdentity = uint160();
+    }
+    else
+    {
+        nodeIdentity = GetDestinationID(dest);
+    }
+}
+
+CNodeData::CNodeData(std::string netAddr, std::string paymentAddr) :
+    networkAddress(netAddr)
+{
+    nodeIdentity = GetDestinationID(DecodeDestination(paymentAddr));
+}
+
+uint160 CurrencyNameToChainID(std::string currencyStr)
+{
+    std::string extraName;
+    uint160 retVal;
+    currencyStr = TrimSpaces(currencyStr);
+    if (!currencyStr.size())
+    {
+        return retVal;
+    }
+    ParseSubNames(currencyStr, extraName, true);
+    if (currencyStr.back() == '@' || (extraName != VERUS_CHAINNAME && extraName != ""))
+    {
+        return retVal;
+    }
+    CTxDestination currencyDest = DecodeDestination(currencyStr);
+    if (currencyDest.which() == COptCCParams::ADDRTYPE_INVALID)
+    {
+        currencyDest = DecodeDestination(currencyStr + "@");
+    }
+    if (currencyDest.which() != COptCCParams::ADDRTYPE_INVALID)
+    {
+        retVal = GetDestinationID(currencyDest);
+    }
+    return retVal;
+}
+
+CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
+{
+    try
+    {
+        nVersion = PBAAS_VERSION;
+        name = std::string(uni_get_str(find_value(obj, "name")), 0, (KOMODO_ASSETCHAIN_MAXLEN - 1));
+
+        std::string parentStr = uni_get_str(find_value(obj, "parent"));
+        if (parentStr != "")
+        {
+            CTxDestination parentDest = DecodeDestination(parentStr);
+            parent = GetDestinationID(parentDest);
+            // if we have a destination, but it is invalid, the json for this definition cannot be valid
+            if (parentDest.which() == COptCCParams::ADDRTYPE_INVALID)
+            {
+                nVersion = PBAAS_VERSION_INVALID;
+            }
+        }
+
+        name = CleanName(name, parent);
+
+        options = (uint32_t)uni_get_int64(find_value(obj, "options"));
+
+        idRegistrationAmount = AmountFromValueNoErr(find_value(obj, "idregistrationprice"));
+        idReferralLevels = uni_get_int(find_value(obj, "idreferrallevels"));
+
+        UniValue notaryArr = find_value(obj, "notaries");
+        minNotariesConfirm = 0;
+        if (notaryArr.isArray())
+        {
+            for (int i = 0; i < notaryArr.size(); i++)
+            {
+                CIdentityID notaryID;
+                CTxDestination notaryDest = DecodeDestination(uni_get_str(notaryArr[i]));
+                notaryID = GetDestinationID(notaryDest);
+                // if we have a destination, but it is invalid, the json for this definition cannot be valid
+                if (notaryID.IsNull())
+                {
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                else
+                {
+                    notaries.push_back(notaryID);
+                }
+            }
+            minNotariesConfirm = uni_get_int(find_value(obj, "minnotariesconfirm"));
+        }
+        billingPeriod = uni_get_int(find_value(obj, "billingperiod"));
+        notarizationReward = AmountFromValueNoErr(find_value(obj, "notarizationreward"));
+
+        startBlock = uni_get_int(find_value(obj, "startblock"));
+        endBlock = uni_get_int(find_value(obj, "endblock"));
+
+        proofProtocol = (EProofProtocol)uni_get_int(find_value(obj, "proofprotocol"), (int32_t)PROOF_PBAASMMR);
+        if (proofProtocol != PROOF_PBAASMMR && proofProtocol != PROOF_CHAINID)
+        {
+            LogPrintf("%s: proofprotocol must be either %d or %d\n", __func__, (int)PROOF_PBAASMMR, (int)PROOF_CHAINID);
+            nVersion = PBAAS_VERSION_INVALID;
+        }
+        notarizationProtocol = (ENotarizationProtocol)uni_get_int(find_value(obj, "notarizationprotocol"), (int32_t)NOTARIZATION_AUTO);
+        if (notarizationProtocol != NOTARIZATION_AUTO)
+        {
+            LogPrintf("%s: notarization protocol must be %d at this time\n", __func__, (int)NOTARIZATION_AUTO);
+            nVersion = PBAAS_VERSION_INVALID;
+        }
+        int32_t totalReserveWeight = AmountFromValueNoErr(find_value(obj, "reserveratio"));
+        UniValue currencyArr = find_value(obj, "currencies");
+        UniValue weightArr = find_value(obj, "weights");
+        UniValue conversionArr = find_value(obj, "conversions");
+        UniValue minPreconvertArr = find_value(obj, "minpreconversion");
+        UniValue maxPreconvertArr = find_value(obj, "maxpreconversion");
+        UniValue initialContributionArr = find_value(obj, "initialcontributions");
+        UniValue preConversionsArr = find_value(obj, "preconversions");
+
+        bool convertible = false;
+
+        if (currencyArr.isArray() && currencyArr.size())
+        {
+            // if weights are defined, make sure they are defined correctly, if not, define them
+            if (weightArr.isArray() && weightArr.size())
+            {
+                if (weightArr.size() != currencyArr.size())
+                {
+                    LogPrintf("%s: reserve currency weights must be specified for all currencies\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                else
+                {
+                    for (int i = 0; i < currencyArr.size(); i++)
+                    {
+                        int32_t weight = (int32_t)AmountFromValueNoErr(weightArr[i]);
+                        if (weight <= 0)
+                        {
+                            nVersion = PBAAS_VERSION_INVALID;
+                            break;
+                        }
+                        weights.push_back(weight);
+                    }
+                }
+            }
+            else if (totalReserveWeight)
+            {
+                uint32_t oneWeight = totalReserveWeight / SATOSHIDEN;
+                uint32_t mod = totalReserveWeight % SATOSHIDEN;
+                for (int i = 0; i < currencyArr.size(); i++)
+                {
+                    // distribute remainder of weight among first come currencies
+                    int32_t weight = oneWeight;
+                    if (mod > 0)
+                    {
+                        weight++;
+                        mod--;
+                    }
+                    weights.push_back(weight);
+                }
+            }
+
+            // if we have weights, we can be a fractional currency
+            if (weights.size())
+            {
+                // if we are a reserve currency, explicit conversion values are not valid
+                // and are based on non-zero, initial contributions relative to supply
+                if ((conversionArr.isArray() && conversionArr.size()) ||
+                    !initialContributionArr.isArray() || 
+                    initialContributionArr.size() != currencyArr.size() ||
+                    weights.size() != currencyArr.size() ||
+                    !IsFractional())
+                {
+                    LogPrintf("%s: reserve currencies must have weights, initial contributions in every currency, and no explicit conversion rates\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                else
+                {
+                    convertible = true;
+                }
+            }
+            else
+            {
+                // if we are not a reserve currency, we either have a conversion vector, or we are not convertible at all
+                if (conversionArr.isArray() && conversionArr.size() && conversionArr.size() != currencyArr.size())
+                {
+                    LogPrintf("%s: non-reserve currencies must define all conversion rates for supported currencies if they define any\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                else if (initialContributionArr.isArray() && initialContributionArr.size() != currencyArr.size())
+                {
+                    LogPrintf("%s: initial contributions for currencies must all be specified if any are specified\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                else
+                {
+                    convertible = true;
+                }
+            }
+
+            if (convertible && nVersion != PBAAS_VERSION_INVALID)
+            {
+                if (minPreconvertArr.isArray() && minPreconvertArr.size() && minPreconvertArr.size() != currencyArr.size())
+                {
+                    LogPrintf("%s: currencies with minimum conversion required must define all minimums if they define any\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                if (maxPreconvertArr.isArray() && maxPreconvertArr.size() && maxPreconvertArr.size() != currencyArr.size())
+                {
+                    LogPrintf("%s: currencies that include maximum conversions on pre-launch must specify all maximums\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                if (initialContributionArr.isArray() && initialContributionArr.size() && initialContributionArr.size() != currencyArr.size())
+                {
+                    LogPrintf("%s: currencies that include initial contributions in one currency on pre-launch must specify all currency amounts\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+            }
+
+            bool isInitialContributions = initialContributionArr.isArray() && initialContributionArr.size();
+            bool isPreconvertMin = minPreconvertArr.isArray() && minPreconvertArr.size();
+            bool isPreconvertMax = maxPreconvertArr.isArray() && maxPreconvertArr.size();
+            bool explicitConversions = conversionArr.isArray() && conversionArr.size();
+            bool havePreConversions = preConversionsArr.isArray() && preConversionsArr.size();
+
+            if (IsFractional() && explicitConversions)
+            {
+                LogPrintf("%s: cannot specify explicit conversion values for reserve currencies\n", __func__);
+                nVersion = PBAAS_VERSION_INVALID;
+            }
+
+            for (int i = 0; nVersion != PBAAS_VERSION_INVALID && i < currencyArr.size(); i++)
+            {
+                uint160 currencyID = CurrencyNameToChainID(uni_get_str(currencyArr[i]));
+                // if we have a destination, but it is invalid, the json for this definition cannot be valid
+                if (currencyID.IsNull())
+                {
+                    nVersion = PBAAS_VERSION_INVALID;
+                    break;
+                }
+                else
+                {
+                    currencies.push_back(currencyID);
+                }
+
+                if (isInitialContributions)
+                {
+                    int64_t contrib = AmountFromValueNoErr(initialContributionArr[i]);
+                    if (IsFractional() && contrib < MIN_RESERVE_CONTRIBUTION)
+                    {
+                        LogPrintf("%s: all fractional reserve currencies must start with %s minimum initial contribution in each currency\n", __func__, ValueFromAmount(MIN_RESERVE_CONTRIBUTION).write().c_str());
+                        nVersion = PBAAS_VERSION_INVALID;
+                        break;
+                    }
+                    contributions.push_back(contrib);
+                    preconverted.push_back(contrib);
+                }
+
+                if (havePreConversions && i < preConversionsArr.size())
+                {
+                    int64_t contrib = AmountFromValueNoErr(preConversionsArr[i]);
+                    preconverted.push_back(contrib);
+                }
+
+                int64_t minPre = 0;
+                if (isPreconvertMin)
+                {
+                    minPre = AmountFromValueNoErr(minPreconvertArr[i]);
+                    if (minPre < 0)
+                    {
+                        LogPrintf("%s: minimum preconversions for any currency may not be less than 0\n", __func__);
+                        nVersion = PBAAS_VERSION_INVALID;
+                        break;
+                    }
+                    minPreconvert.push_back(minPre);
+                }
+                if (isPreconvertMax)
+                {
+                    int64_t maxPre = AmountFromValueNoErr(maxPreconvertArr[i]);
+                    if (maxPre < 0 || maxPre < minPre)
+                    {
+                        LogPrintf("%s: maximum preconversions for any currency may not be less than 0 or minimum\n", __func__);
+                        nVersion = PBAAS_VERSION_INVALID;
+                        break;
+                    }
+                    maxPreconvert.push_back(maxPre);
+                }
+                if (explicitConversions)
+                {
+                    int64_t conversion = AmountFromValueNoErr(conversionArr[i]);
+                    if (conversion < 0)
+                    {
+                        LogPrintf("%s: conversions for any currency must be greater than 0\n", __func__);
+                        nVersion = PBAAS_VERSION_INVALID;
+                        break;
+                    }
+                    conversions.push_back(conversion);
+                }
+            }
+        }
+
+        preAllocationRatio = AmountFromValueNoErr(find_value(obj, "preallocationratio"));
+
+        UniValue preallocationArr = find_value(obj, "preallocation");
+        if (preallocationArr.isArray())
+        {
+            for (int i = 0; i < preallocationArr.size(); i++)
+            {
+                std::vector<std::string> preallocationKey = preallocationArr[i].getKeys();
+                std::vector<UniValue> preallocationValue = preallocationArr[i].getValues();
+                if (preallocationKey.size() != 1 || preallocationValue.size() != 1)
+                {
+                    LogPrintf("%s: each preallocation entry must contain one destination identity and one amount\n", __func__);
+                    printf("%s: each preallocation entry must contain one destination identity and one amount\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                    break;
+                }
+
+                CTxDestination preallocDest = DecodeDestination(preallocationKey[0]);
+
+                if (preallocDest.which() != COptCCParams::ADDRTYPE_ID && preallocDest.which() != COptCCParams::ADDRTYPE_INVALID)
+                {
+                    LogPrintf("%s: preallocation destination must be an identity\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                    break;
+                }
+
+                CAmount preAllocAmount = AmountFromValueNoErr(preallocationValue[0]);
+                if (preAllocAmount <= 0)
+                {
+                    LogPrintf("%s: preallocation values must be greater than zero\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                    break;
+                }
+                preAllocation.push_back(make_pair(CIdentityID(GetDestinationID(preallocDest)), preAllocAmount));
+            }
+        }
+
+        auto vEras = uni_getValues(find_value(obj, "eras"));
+        if (vEras.size() > ASSETCHAINS_MAX_ERAS)
+        {
+            vEras.resize(ASSETCHAINS_MAX_ERAS);
+        }
+
+        for (auto era : vEras)
+        {
+            rewards.push_back(uni_get_int64(find_value(era, "reward")));
+            rewardsDecay.push_back(uni_get_int64(find_value(era, "decay")));
+            halving.push_back(uni_get_int64(find_value(era, "halving")));
+            eraEnd.push_back(uni_get_int64(find_value(era, "eraend")));
+        }
+    }
+    catch (exception e)
+    {
+        LogPrintf("%s: exception reading currency definition JSON\n", __func__, e.what());
+        nVersion = PBAAS_VERSION_INVALID;
+    }
+}
+
+int64_t CCurrencyDefinition::CalculateRatioOfValue(int64_t value, int64_t ratio)
+{
+    arith_uint256 bigAmount(value);
+    static const arith_uint256 bigSatoshi(SATOSHIDEN);
+
+    int64_t retVal = ((bigAmount * arith_uint256(ratio)) / bigSatoshi).GetLow64();
+    return retVal;
+}
+
+// this will only return an accurate result after total preconversion has been updated and before any emission
+int64_t CCurrencyDefinition::GetTotalPreallocation() const
+{
+    CAmount totalPreconvertedNative = 0;
+    CAmount totalPreallocatedNative = 0;
+    if (preAllocationRatio == 0)
+    {
+        for (auto onePreallocation : preAllocation)
+        {
+            totalPreallocatedNative += onePreallocation.second;
+        }
+        return totalPreallocatedNative;
+    }
+    for (auto oneConversion : preconverted)
+    {
+        totalPreconvertedNative += oneConversion;
+    }
+    if (!totalPreconvertedNative || preAllocationRatio >= SATOSHIDEN)
+    {
+        return 0;
+    }
+    arith_uint256 bigAmount(totalPreconvertedNative);
+    static const arith_uint256 bigSatoshi(SATOSHIDEN);
+    arith_uint256 conversionPercent(preAllocationRatio);
+
+    CAmount newAmount = ((bigAmount * bigSatoshi) / (bigSatoshi - conversionPercent)).GetLow64();
+    CAmount retAmount = CalculateRatioOfValue(newAmount, preAllocationRatio);
+    newAmount = totalPreconvertedNative + retAmount;
+
+    retAmount = CalculateRatioOfValue(newAmount, preAllocationRatio); // again to account for minimum fee
+    retAmount += totalPreconvertedNative - (newAmount - retAmount);   // add any additional difference
+    return retAmount;
+}
+
+std::vector<std::pair<uint160, int64_t>> CCurrencyDefinition::GetPreAllocationAmounts() const
+{
+    if (!preAllocationRatio)
+    {
+        return preAllocation;
+    }
+    if (preAllocationRatio >= SATOSHIDEN)
+    {
+        return std::vector<std::pair<uint160, int64_t>>();
+    }
+    int64_t totalPreAllocation = GetTotalPreallocation();
+    int64_t totalPreAllocUnits = 0;
+    for (auto &onePreAlloc : preAllocation)
+    {
+        totalPreAllocUnits += onePreAlloc.second;
+    }
+    static arith_uint256 bigSatoshi(SATOSHIDEN);
+
+    std::vector<std::pair<uint160, int64_t>> retVal(preAllocation.size());
+    for (int i = 0; i < preAllocation.size(); i++)
+    {
+        if (i == preAllocation.size() - 1)
+        {
+            retVal[i] = make_pair(preAllocation[i].first, totalPreAllocation);
+        }
+        else
+        {
+            CAmount subRatio = ((arith_uint256(preAllocation[i].second) * bigSatoshi) / totalPreAllocUnits).GetLow64();
+            CAmount thisPreAlloc = CalculateRatioOfValue(totalPreAllocation, subRatio);
+            retVal[i] = make_pair(preAllocation[i].first, thisPreAlloc);
+            totalPreAllocation -= thisPreAlloc;
+        }
+    }
+    return retVal;
+}
+
 

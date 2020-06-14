@@ -19,7 +19,7 @@
 using namespace std;
 
 CCheatList cheatList;
-boost::optional<libzcash::SaplingPaymentAddress> cheatCatcher;
+boost::optional<libzcash::SaplingPaymentAddress> defaultSaplingDest;
 
 uint32_t CCheatList::Prune(uint32_t height)
 {

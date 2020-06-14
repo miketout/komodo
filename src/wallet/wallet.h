@@ -606,20 +606,30 @@ public:
     void SetSproutNoteData(mapSproutNoteData_t &noteData);
     void SetSaplingNoteData(mapSaplingNoteData_t &noteData);
 
+    std::pair<libzcash::SproutNotePlaintext, libzcash::SproutPaymentAddress> DecryptSproutNote(
+	JSOutPoint jsop) const;
+    boost::optional<std::pair<
+	libzcash::SaplingNotePlaintext,
+	libzcash::SaplingPaymentAddress>> DecryptSaplingNote(SaplingOutPoint op) const;
+    boost::optional<std::pair<
+	libzcash::SaplingNotePlaintext,
+	libzcash::SaplingPaymentAddress>> RecoverSaplingNote(
+            SaplingOutPoint op, std::set<uint256>& ovks) const;	
+
     //! filter decides which addresses will count towards the debit
     bool HasMatureCoins() const;    // coinbase transactions can support instant-spend outputs for conversion, import, and non-emission outputs
     CAmount GetDebit(const isminefilter& filter) const;
-    CAmount GetReserveDebit(const isminefilter& filter) const;
+    CCurrencyValueMap GetReserveDebit(const isminefilter& filter) const;
     CAmount GetCredit(const isminefilter& filter) const;
-    CAmount GetReserveCredit(const isminefilter& filter) const;
+    CCurrencyValueMap GetReserveCredit(const isminefilter& filter) const;
     CAmount GetImmatureCredit(bool fUseCache=true) const;
-    CAmount GetImmatureReserveCredit(bool fUseCache=true) const;
+    CCurrencyValueMap GetImmatureReserveCredit(bool fUseCache=true) const;
     CAmount GetAvailableCredit(bool fUseCache=true) const;
-    CAmount GetAvailableReserveCredit(bool fUseCache=true) const;
+    CCurrencyValueMap GetAvailableReserveCredit(bool fUseCache=true) const;
     CAmount GetImmatureWatchOnlyCredit(const bool& fUseCache=true) const;
-    CAmount GetImmatureWatchOnlyReserveCredit(const bool& fUseCache=true) const;
+    CCurrencyValueMap GetImmatureWatchOnlyReserveCredit(const bool& fUseCache=true) const;
     CAmount GetAvailableWatchOnlyCredit(const bool& fUseCache=true) const;
-    CAmount GetAvailableWatchOnlyReserveCredit(const bool& fUseCache=true) const;
+    CCurrencyValueMap GetAvailableWatchOnlyReserveCredit(const bool& fUseCache=true) const;
     CAmount GetChange() const;
 
     void GetAmounts(std::list<COutputEntry>& listReceived,
@@ -645,9 +655,6 @@ public:
     std::set<uint256> GetConflicts() const;
 };
 
-
-
-
 class COutput
 {
 public:
@@ -656,6 +663,8 @@ public:
     int nDepth;
     bool fSpendable;
 
+    COutput() : tx(nullptr), i(0), nDepth(0), fSpendable(false) {}
+
     COutput(const CWalletTx *txIn, int iIn, int nDepthIn, bool fSpendableIn)
     {
         tx = txIn; i = iIn; nDepth = nDepthIn; fSpendable = fSpendableIn;
@@ -663,9 +672,6 @@ public:
 
     std::string ToString() const;
 };
-
-
-
 
 /** Private key that includes an expiration date in case it never gets used. */
 class CWalletKey
@@ -785,7 +791,15 @@ class CWallet : public CCryptoKeyStore, public CValidationInterface
 {
 private:
     bool SelectCoins(const CAmount& nTargetValue, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, CAmount& nValueRet, bool& fOnlyCoinbaseCoinsRet, bool& fNeedCoinbaseCoinsRet, const CCoinControl *coinControl = NULL) const;
-    bool SelectReserveCoins(const CAmount& nTargetValue, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, CAmount& nValueRet, bool& fOnlyCoinbaseCoinsRet, bool& fNeedCoinbaseCoinsRet, const CCoinControl *coinControl = NULL) const;
+    bool SelectReserveCoins(const CCurrencyValueMap& targetReserveValues, 
+                            CAmount targetNativeValue,
+                            set<pair<const CWalletTx*,unsigned int> >& setCoinsRet,
+                            CCurrencyValueMap &valueRet,
+                            CAmount &nativeRet,
+                            bool& fOnlyCoinbaseCoinsRet,
+                            bool& fNeedCoinbaseCoinsRet,
+                            const CCoinControl* coinControl=NULL,
+                            const CTxDestination *pOnlyFromDest=NULL) const;
 
     CWalletDB *pwalletdbEncryption;
 
@@ -1035,10 +1049,17 @@ public:
     //! check whether we are allowed to upgrade (or already support) to the named feature
     bool CanSupportFeature(enum WalletFeature wf) { AssertLockHeld(cs_wallet); return nWalletMaxVersion >= wf; }
 
-    void AvailableCoins(std::vector<COutput>& vCoins, bool fOnlyConfirmed=true, const CCoinControl *coinControl = NULL, bool fIncludeZeroValue=false, bool fIncludeCoinBase=true, bool fIncludeProtectedCoinbase=true) const;
-    void AvailableReserveCoins(std::vector<COutput>& vCoins, bool fOnlyConfirmed, const CCoinControl *coinControl, bool fIncludeCoinBase) const;
+    void AvailableCoins(std::vector<COutput>& vCoins, bool fOnlyConfirmed=true, const CCoinControl *coinControl = NULL, bool fIncludeZeroValue=false, bool fIncludeCoinBase=true, bool fIncludeProtectedCoinbase=true, bool fIncludeImmatureCoins=false) const;
+    void AvailableReserveCoins(std::vector<COutput>& vCoins, bool fOnlyConfirmed, const CCoinControl *coinControl, bool fIncludeCoinBase, bool fIncludeNative=true, const CTxDestination *pOnlyFromDest=nullptr, const CCurrencyValueMap *pOnlyTheseCurrencies=nullptr) const;
     bool SelectCoinsMinConf(const CAmount& nTargetValue, int nConfMine, int nConfTheirs, std::vector<COutput> vCoins, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, CAmount& nValueRet) const;
-    bool SelectReserveCoinsMinConf(const CAmount& nTargetValue, int nConfMine, int nConfTheirs, std::vector<COutput> vCoins, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, CAmount& nValueRet) const;
+    bool SelectReserveCoinsMinConf(const CCurrencyValueMap& targetValues, 
+                                    CAmount targetNativeValue, 
+                                    int nConfMine, 
+                                    int nConfTheirs, 
+                                    std::vector<COutput> vCoins, 
+                                    std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, 
+                                    CCurrencyValueMap& valueRet,
+                                    CAmount &nativeValueRet) const;
 
     bool IsSpent(const uint256& hash, unsigned int n) const;
     bool IsSproutSpent(const uint256& nullifier) const;
@@ -1084,11 +1105,14 @@ public:
     bool AddCScript(const CScript& redeemScript);
     bool LoadCScript(const CScript& redeemScript);
 
+    void ClearIdentities();
     bool AddIdentity(const CIdentityMapKey &mapKey, const CIdentityMapValue &identity);
     bool UpdateIdentity(const CIdentityMapKey &mapKey, const CIdentityMapValue &identity);
     bool AddUpdateIdentity(const CIdentityMapKey &mapKey, const CIdentityMapValue &identity);
     bool RemoveIdentity(const CIdentityMapKey &mapKey, const uint256 &txid=uint256());
     bool LoadIdentity(const CIdentityMapKey &mapKey, const CIdentityMapValue &identity);
+
+    virtual std::set<CKeyID> GetTransactionDestinationIDs();
 
     //! Adds a destination data tuple to the store, and saves it to disk
     bool AddDestData(const CTxDestination &dest, const std::string &key, const std::string &value);
@@ -1202,22 +1226,23 @@ public:
     void ResendWalletTransactions(int64_t nBestBlockTime);
     std::vector<uint256> ResendWalletTransactionsBefore(int64_t nTime);
     CAmount GetBalance() const;
-    CAmount GetReserveBalance() const;
+    CCurrencyValueMap GetReserveBalance() const;
     CAmount GetUnconfirmedBalance() const;
-    CAmount GetUnconfirmedReserveBalance() const;
+    CCurrencyValueMap GetUnconfirmedReserveBalance() const;
     CAmount GetImmatureBalance() const;
-    CAmount GetImmatureReserveBalance() const;
+    CCurrencyValueMap GetImmatureReserveBalance() const;
     CAmount GetWatchOnlyBalance() const;
-    CAmount GetWatchOnlyReserveBalance() const;
+    CCurrencyValueMap GetWatchOnlyReserveBalance() const;
     CAmount GetUnconfirmedWatchOnlyBalance() const;
-    CAmount GetUnconfirmedWatchOnlyReserveBalance() const;
+    CCurrencyValueMap GetUnconfirmedWatchOnlyReserveBalance() const;
     CAmount GetImmatureWatchOnlyBalance() const;
-    CAmount GetImmatureWatchOnlyReserveBalance() const;
+    CCurrencyValueMap GetImmatureWatchOnlyReserveBalance() const;
     bool FundTransaction(CMutableTransaction& tx, CAmount& nFeeRet, int& nChangePosRet, std::string& strFailReason);
     bool CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosRet,
                            std::string& strFailReason, const CCoinControl *coinControl = NULL, bool sign = true);
-    bool CreateReserveTransaction(const std::vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosRet,
-                           std::string& strFailReason, const CCoinControl *coinControl = NULL, bool sign = true, bool includeRefunds = false);
+    bool CreateReserveTransaction(const std::vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet, int& nChangePosRet, 
+                           int &nChangeOutputs, std::string& strFailReason, const CCoinControl *coinControl = NULL, 
+                           const CTxDestination *pOnlyFromDest=NULL, bool sign = true);
     bool CommitTransaction(CWalletTx& wtxNew, boost::optional<CReserveKey&> reservekey);
 
     static CFeeRate minTxFee;
@@ -1268,9 +1293,11 @@ public:
     /** should probably be renamed to IsRelevantToMe */
     bool IsFromMe(const CTransaction& tx) const;
     CAmount GetDebit(const CTransaction& tx, const isminefilter& filter) const;
+    CCurrencyValueMap GetReserveDebit(const CTxIn &txin, const isminefilter& filter) const;
+    CCurrencyValueMap GetReserveDebit(const CTransaction& tx, const isminefilter& filter) const;
     CAmount GetCredit(const CTransaction& tx, int32_t voutNum, const isminefilter& filter) const;
-    CAmount GetReserveCredit(const CTransaction& tx, int32_t voutNum, const isminefilter& filter) const;
-    CAmount GetReserveCredit(const CTransaction& tx, const isminefilter& filter) const;
+    CCurrencyValueMap GetReserveCredit(const CTransaction& tx, int32_t voutNum, const isminefilter& filter) const;
+    CCurrencyValueMap GetReserveCredit(const CTransaction& tx, const isminefilter& filter) const;
     CAmount GetCredit(const CTransaction& tx, const isminefilter& filter) const;
     CAmount GetChange(const CTransaction& tx) const;
     void ChainTip(const CBlockIndex *pindex, const CBlock *pblock, SproutMerkleTree sproutTree, SaplingMerkleTree saplingTree, bool added);
@@ -1407,7 +1434,7 @@ public:
 
     // staking functions
     bool VerusSelectStakeOutput(CBlock *pBlock, arith_uint256 &hashResult, CTransaction &stakeSource, int32_t &voutNum, int32_t nHeight, uint32_t &bnTarget) const;
-    int32_t VerusStakeTransaction(CBlock *pBlock, CMutableTransaction &txNew, uint32_t &bnTarget, arith_uint256 &hashResult, uint8_t *utxosig, CPubKey pk) const;
+    int32_t VerusStakeTransaction(CBlock *pBlock, CMutableTransaction &txNew, uint32_t &bnTarget, arith_uint256 &hashResult, std::vector<unsigned char> &utxosig, CPubKey pk) const;
 };
 
 /** A key allocated from the key pool. */
@@ -1526,6 +1553,10 @@ public:
     }
 
     CPubKey operator()(const CIdentityID &sid) const {
+        return CPubKey();
+    }
+
+    CPubKey operator()(const CQuantumID &qid) const {
         return CPubKey();
     }
 

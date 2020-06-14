@@ -37,14 +37,14 @@
  * a possible code is EVAL_BITCOIN_SCRIPT, where the entire binary
  * after the code is interpreted as a bitcoin script.
  */
-#define FOREACH_EVAL(EVAL)             \
-        EVAL(EVAL_NONE, 0x0)  \
+#define FOREACH_EVAL(EVAL) \
+        EVAL(EVAL_NONE, 0x0) \
         EVAL(EVAL_STAKEGUARD, 0x1)  \
-        EVAL(EVAL_PBAASDEFINITION, 0x2)  \
+        EVAL(EVAL_CURRENCY_DEFINITION, 0x2)  \
         EVAL(EVAL_SERVICEREWARD, 0x3)  \
         EVAL(EVAL_EARNEDNOTARIZATION, 0x4)  \
         EVAL(EVAL_ACCEPTEDNOTARIZATION, 0x5)  \
-        EVAL(EVAL_FINALIZENOTARIZATION, 0x6)  \
+        EVAL(EVAL_FINALIZE_NOTARIZATION, 0x6)  \
         EVAL(EVAL_CURRENCYSTATE, 0x7)  \
         EVAL(EVAL_RESERVE_TRANSFER, 0x8)  \
         EVAL(EVAL_RESERVE_OUTPUT, 0x9)  \
@@ -57,6 +57,8 @@
         EVAL(EVAL_IDENTITY_RECOVER, 0x10)  \
         EVAL(EVAL_IDENTITY_COMMITMENT, 0x11)  \
         EVAL(EVAL_IDENTITY_RESERVATION, 0x12)  \
+        EVAL(EVAL_FINALIZE_EXPORT, 0x13)  \
+        EVAL(EVAL_QUANTUM_KEY, 0x14)  \
         EVAL(EVAL_IMPORTPAYOUT, 0xe1)  \
         EVAL(EVAL_IMPORTCOIN, 0xe2)  \
         EVAL(EVAL_ASSETS, 0xe3)  \

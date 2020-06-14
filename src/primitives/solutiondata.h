@@ -20,17 +20,22 @@ class CActivationHeight
         enum {
             MAX_HEIGHT = INT_MAX,
             DEFAULT_UPGRADE_HEIGHT = MAX_HEIGHT,
-            NUM_VERSIONS = 5,
+            NUM_VERSIONS = 6,
             SOLUTION_VERUSV1 = 0,
             SOLUTION_VERUSV2 = 1,
             SOLUTION_VERUSV3 = 2,
             SOLUTION_VERUSV4 = 3,
             SOLUTION_VERUSV5 = 4,
+            SOLUTION_VERUSV6 = 5,
             ACTIVATE_VERUSHASH2 = SOLUTION_VERUSV2,
             ACTIVATE_EXTENDEDSOLUTION = SOLUTION_VERUSV3,
             ACTIVATE_IDENTITY = SOLUTION_VERUSV4,
             ACTIVATE_VERUSHASH2_1 = SOLUTION_VERUSV4,
-            ACTIVATE_PBAAS = SOLUTION_VERUSV5
+            ACTIVATE_EXTENDEDSTAKE = SOLUTION_VERUSV5,
+            ACTIVATE_IDCONSENSUS2 = SOLUTION_VERUSV5,
+            ACTIVATE_VERUSHASH2_2 = SOLUTION_VERUSV5,
+            ACTIVATE_STAKEHEADER = SOLUTION_VERUSV6,
+            ACTIVATE_PBAAS = SOLUTION_VERUSV6
         };
         bool active;
         int32_t heights[NUM_VERSIONS];
@@ -80,10 +85,14 @@ public:
     uint256 hashFinalSaplingRoot;
     uint256 nNonce;
     uint32_t nBits;
+    uint256 hashPrevMMRRoot;
+    uint256 hashBlockMMRRoot;
 
     CPBaaSPreHeader() : nBits(0) {}
-    CPBaaSPreHeader(const uint256 &prevBlock, const uint256 &merkleRoot, const uint256 &finalSaplingRoot,const uint256 &nonce, uint32_t compactTarget) : 
-                    hashPrevBlock(prevBlock), hashMerkleRoot(merkleRoot), hashFinalSaplingRoot(finalSaplingRoot), nNonce(nonce), nBits(compactTarget) {}
+    CPBaaSPreHeader(const uint256 &prevBlock, const uint256 &merkleRoot, const uint256 &finalSaplingRoot,const uint256 &nonce, uint32_t compactTarget,
+                    const uint256 &PrevMMRRoot, const uint256 &TransactionMMRRoot) : 
+                    hashPrevBlock(prevBlock), hashMerkleRoot(merkleRoot), hashFinalSaplingRoot(finalSaplingRoot), nNonce(nonce), nBits(compactTarget),
+                    hashPrevMMRRoot(PrevMMRRoot), hashBlockMMRRoot(TransactionMMRRoot) {}
 
     CPBaaSPreHeader(const CBlockHeader &bh);
 
@@ -96,6 +105,8 @@ public:
         READWRITE(hashFinalSaplingRoot);
         READWRITE(nNonce);
         READWRITE(nBits);
+        READWRITE(hashPrevMMRRoot);
+        READWRITE(hashBlockMMRRoot);
     }
 
     void SetBlockData(CBlockHeader &bh);
@@ -107,7 +118,6 @@ class CPBaaSBlockHeader
 public:
     uint160 chainID;                                                // hash of unique PBaaS symbol on Verus chain
     uint256 hashPreHeader;                                          // hash of block before solution + chain power + block number
-    uint256 hashPrevMMRRoot;                                        // prior block's Merkle Mountain Range
 
     // header
     static const size_t ID_OFFSET = 0;                              // offset of 32 byte ID in serialized stream
@@ -119,7 +129,7 @@ public:
         SetNull();
     }
 
-    CPBaaSBlockHeader(const uint160 &cID, const uint256 &hashPre, const uint256 &hashPrevMMR) : chainID(cID), hashPreHeader(hashPre), hashPrevMMRRoot(hashPrevMMR) { }
+    CPBaaSBlockHeader(const uint160 &cID, const uint256 &hashPre) : chainID(cID), hashPreHeader(hashPre) { }
 
     CPBaaSBlockHeader(const char *pbegin, const char *pend) 
     {
@@ -127,17 +137,18 @@ public:
         s >> *this;
     }
 
-    CPBaaSBlockHeader(const uint160 &cID, const CPBaaSPreHeader &pbph, const uint256 &hashPrevMMR);
+    CPBaaSBlockHeader(const uint160 &cID, const CPBaaSPreHeader &pbph);
 
     CPBaaSBlockHeader(const uint160 &cID, 
-                          const uint256 &hashPrevBlock, 
-                          const uint256 &hashMerkleRoot, 
-                          const uint256 &hashFinalSaplingRoot, 
-                          const uint256 &nNonce, 
-                          uint32_t nBits, 
-                          const uint256 &hashPrevMMRRoot)
+                        const uint256 &hashPrevBlock, 
+                        const uint256 &hashMerkleRoot, 
+                        const uint256 &hashFinalSaplingRoot, 
+                        const uint256 &nNonce, 
+                        uint32_t nBits, 
+                        const uint256 &hashPrevMMRRoot,
+                        const uint256 &hashBlockMMRRoot)
     {
-        CPBaaSPreHeader pbph(hashPrevBlock, hashMerkleRoot, hashFinalSaplingRoot, nNonce, nBits);
+        CPBaaSPreHeader pbph(hashPrevBlock, hashMerkleRoot, hashFinalSaplingRoot, nNonce, nBits, hashPrevMMRRoot, hashBlockMMRRoot);
 
         CHashWriter hw(SER_GETHASH, PROTOCOL_VERSION);
         hw << pbph;
@@ -151,24 +162,22 @@ public:
     inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(chainID);
         READWRITE(hashPreHeader);
-        READWRITE(hashPrevMMRRoot);
     }
 
     bool operator==(const CPBaaSBlockHeader &right)
     {
-        return (chainID == right.chainID && hashPreHeader == right.hashPreHeader && hashPrevMMRRoot == right.hashPrevMMRRoot);
+        return (chainID == right.chainID && hashPreHeader == right.hashPreHeader);
     }
 
     bool operator!=(const CPBaaSBlockHeader &right)
     {
-        return (chainID != right.chainID || hashPreHeader != right.hashPreHeader || hashPrevMMRRoot != right.hashPrevMMRRoot);
+        return (chainID != right.chainID || hashPreHeader != right.hashPreHeader);
     }
 
     void SetNull()
     {
         chainID.SetNull();
         hashPreHeader.SetNull();
-        hashPrevMMRRoot.SetNull();
     }
 
     bool IsNull() const
@@ -190,17 +199,32 @@ class CPBaaSSolutionDescriptor
         uint8_t descrBits;
         uint8_t numPBaaSHeaders;                                       // these come right after the base and before the stream
         uint16_t extraDataSize;                                        // in PoS or possibly future blocks, this is a stream after PBaaS headers
-        
+
+        // this is additional data for the block specific header. this is also cleared out
+        // when making a canonical header, and the values here are hashed into the pre-header hash
+        uint256 hashPrevMMRRoot;                                       // prior block's Merkle Mountain Range
+        uint256 hashBlockMMRRoot;                                // this is the root MMR for transactions in this block
+        // end block specific data
+
         CPBaaSSolutionDescriptor() : version(0), descrBits(0), numPBaaSHeaders(0), extraDataSize(0) {}
-        CPBaaSSolutionDescriptor(uint32_t ver, uint8_t descr, uint8_t numSubHeaders, uint16_t sSize) : 
-            version(ver), descrBits(descr), numPBaaSHeaders(numSubHeaders), extraDataSize(sSize) {}
+
+        CPBaaSSolutionDescriptor(uint32_t ver, uint8_t descr, uint8_t numSubHeaders, uint16_t sSize, uint256 PrevMMRRoot, uint256 TransactionMMRRoot) : 
+            version(ver), descrBits(descr), numPBaaSHeaders(numSubHeaders), extraDataSize(sSize), hashPrevMMRRoot(PrevMMRRoot), hashBlockMMRRoot(TransactionMMRRoot)
+        {}
+
         CPBaaSSolutionDescriptor(const std::vector<unsigned char> &vch)
         {
+            assert(vch.size() >= sizeof(*this));
+
             version = vch[0] + (vch[1] << 8) + (vch[2] << 16) + (vch[3] << 24);
             descrBits = vch[4];
             numPBaaSHeaders = vch[5];
             extraDataSize = vch[6] | ((uint16_t)(vch[7]) << 8);
+
+            memcpy(hashPrevMMRRoot.begin(), &(vch[8]), sizeof(hashPrevMMRRoot));
+            memcpy(hashBlockMMRRoot.begin(), &(vch[8 + sizeof(hashBlockMMRRoot)]), sizeof(hashBlockMMRRoot));
         }
+
         void SetVectorBase(std::vector<unsigned char> &vch)
         {
             if (vch.size() >= sizeof(*this))
@@ -213,6 +237,9 @@ class CPBaaSSolutionDescriptor
                 vch[5] = numPBaaSHeaders;
                 vch[6] = extraDataSize & 0xff;
                 vch[7] = (extraDataSize >> 8) & 0xff;
+
+                memcpy(&(vch[8]), hashPrevMMRRoot.begin(), sizeof(hashPrevMMRRoot));
+                memcpy(&(vch[8 + sizeof(hashBlockMMRRoot)]), hashBlockMMRRoot.begin(), sizeof(hashBlockMMRRoot));
             }
         }
 };
@@ -311,7 +338,7 @@ class CConstVerusSolutionVector
         // returns 0 if not PBaaS, 1 if PBaaS PoW, -1 if PBaaS PoS
         static int32_t IsPBaaS(const std::vector<unsigned char> &vch)
         {
-            if (Version(vch) == CActivationHeight::ACTIVATE_PBAAS)
+            if (Version(vch) >= CActivationHeight::ACTIVATE_PBAAS)
             {
                 return  (DescriptorBits(vch) & SOLUTION_POW) ? 1 : -1;
             }
@@ -330,7 +357,6 @@ class CConstVerusSolutionVector
             return GetDescriptor(vch).numPBaaSHeaders * sizeof(CPBaaSBlockHeader) + OVERHEAD_SIZE;
         }
 
-        // return a vector of bytes that contains the internal data for this solution vector
         static uint32_t ExtraDataLen(const std::vector<unsigned char> &vch)
         {
             int len;
@@ -348,7 +374,7 @@ class CConstVerusSolutionVector
             return len < 0 ? 0 : (uint32_t)len;
         }
 
-        // return a vector of bytes that contains the internal data for this solution vector
+        // return a pointer to the bytes that contain the internal data for this solution vector
         const unsigned char *ExtraDataPtr(const std::vector<unsigned char> &vch)
         {
             if (ExtraDataLen(vch))

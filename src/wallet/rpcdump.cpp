@@ -74,6 +74,65 @@ std::string DecodeDumpString(const std::string &str) {
     return ret.str();
 }
 
+UniValue convertpassphrase(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() < 1 || params.size() > 1)
+        throw runtime_error(
+            "convertpassphrase \"walletpassphrase\"\n"
+            "\nConverts Verus Desktop, Agama, Verus Agama, or Verus Mobile passphrase to a private key and WIF (for import with importprivkey).\n"
+            "\nArguments:\n"
+            "1. \"walletpassphrase\"   (string, required) Wallet passphrase\n"
+            "\nResult:\n"
+            "\"walletpassphrase\": \"walletpassphrase\",   (string) Wallet passphrase you entered\n"
+            "\"address\": \"verus address\",             (string) Address corresponding to your passphrase\n"
+            "\"pubkey\": \"publickeyhex\",               (string) The hex value of the raw public key\n"
+            "\"privkey\": \"privatekeyhex\",             (string) The hex value of the raw private key\n"
+            "\"wif\": \"wif\"                            (string) The private key in WIF format to use with 'importprivkey'\n"
+            "\nExamples:\n"
+            + HelpExampleCli("convertpassphrase", "\"walletpassphrase\"")
+            + HelpExampleRpc("convertpassphrase", "\"walletpassphrase\"")
+        );
+
+    bool fCompressed = true;
+    string strAgamaPassphrase = params[0].get_str();
+
+    UniValue ret(UniValue::VOBJ);
+    ret.push_back(Pair("walletpassphrase", strAgamaPassphrase));
+
+    CKey tempkey = DecodeSecret(strAgamaPassphrase);
+    /* first we should check if user pass wif to method, instead of passphrase */
+    if (!tempkey.IsValid()) {
+        /* it's a passphrase, not wif */
+        uint256 sha256;
+        CSHA256().Write((const unsigned char *)strAgamaPassphrase.c_str(), strAgamaPassphrase.length()).Finalize(sha256.begin());
+        std::vector<unsigned char> privkey(sha256.begin(), sha256.begin() + sha256.size());
+        privkey.front() &= 0xf8;
+        privkey.back()  &= 0x7f;
+        privkey.back()  |= 0x40;
+        CKey key;
+        key.Set(privkey.begin(),privkey.end(), fCompressed);
+        CPubKey pubkey = key.GetPubKey();
+        assert(key.VerifyPubKey(pubkey));
+        CKeyID vchAddress = pubkey.GetID();
+
+        ret.push_back(Pair("address", EncodeDestination(vchAddress)));
+        ret.push_back(Pair("pubkey", HexStr(pubkey)));
+        ret.push_back(Pair("privkey", HexStr(privkey)));
+        ret.push_back(Pair("wif", EncodeSecret(key)));
+    } else {
+        /* seems it's a wif */
+        CPubKey pubkey = tempkey.GetPubKey();
+        assert(tempkey.VerifyPubKey(pubkey));
+        CKeyID vchAddress = pubkey.GetID();
+        ret.push_back(Pair("address", EncodeDestination(vchAddress)));
+        ret.push_back(Pair("pubkey", HexStr(pubkey)));
+        ret.push_back(Pair("privkey", HexStr(tempkey)));
+        ret.push_back(Pair("wif", strAgamaPassphrase));
+    }
+
+    return ret;
+}
+
 UniValue importprivkey(const UniValue& params, bool fHelp)
 {
     if (!EnsureWalletIsAvailable(fHelp))
@@ -84,7 +143,7 @@ UniValue importprivkey(const UniValue& params, bool fHelp)
             "importprivkey \"komodoprivkey\" ( \"label\" rescan )\n"
             "\nAdds a private key (as returned by dumpprivkey) to your wallet.\n"
             "\nArguments:\n"
-            "1. \"komodoprivkey\"   (string, required) The private key (see dumpprivkey)\n"
+            "1. \"verusprivkey\"   (string, required) The private key (see dumpprivkey)\n"
             "2. \"label\"            (string, optional, default=\"\") An optional label\n"
             "3. rescan               (boolean, optional, default=true) Rescan the wallet for transactions\n"
             "\nNote: This call can take minutes to complete if rescan is true.\n"
@@ -417,12 +476,14 @@ UniValue z_exportwallet(const UniValue& params, bool fHelp)
     if (!EnsureWalletIsAvailable(fHelp))
         return NullUniValue;
 
-    if (fHelp || params.size() != 1)
+    if (fHelp || params.size() < 1 || params.size() > 2)
         throw runtime_error(
-            "z_exportwallet \"filename\"\n"
+            "z_exportwallet \"filename\" (omitemptytaddresses)\n"
             "\nExports all wallet keys, for taddr and zaddr, in a human-readable format.  Overwriting an existing file is not permitted.\n"
             "\nArguments:\n"
-            "1. \"filename\"    (string, required) The filename, saved in folder set by verusd -exportdir option\n"
+            "1. \"filename\"            (string, required) The filename, saved in folder set by verusd -exportdir option\n"
+            "2. \"omitemptytaddresses\" (boolean, optional) Defaults to false. If true, export only addresses with indexed UTXOs or that control IDs in the wallet\n"
+            "                                               (do not use this option without being sure that all addresses of interest are included)\n"
             "\nResult:\n"
             "\"path\"           (string) The full path of the destination file\n"
             "\nExamples:\n"
@@ -438,12 +499,14 @@ UniValue dumpwallet(const UniValue& params, bool fHelp)
     if (!EnsureWalletIsAvailable(fHelp))
         return NullUniValue;
 
-    if (fHelp || params.size() != 1)
+    if (fHelp || params.size() < 1 || params.size() > 2)
         throw runtime_error(
-            "dumpwallet \"filename\"\n"
+            "dumpwallet \"filename\" (omitemptytaddresses)\n"
             "\nDumps taddr wallet keys in a human-readable format.  Overwriting an existing file is not permitted.\n"
             "\nArguments:\n"
             "1. \"filename\"    (string, required) The filename, saved in folder set by verusd -exportdir option\n"
+            "2. \"omitemptytaddresses\" (boolean, optional) Defaults to false. If true, export only addresses with indexed UTXOs or that control IDs in the wallet\n"
+            "                                               (do not use this option without being sure that all addresses of interest are included)\n"
             "\nResult:\n"
             "\"path\"           (string) The full path of the destination file\n"
             "\nExamples:\n"
@@ -452,15 +515,6 @@ UniValue dumpwallet(const UniValue& params, bool fHelp)
         );
 
 	return dumpwallet_impl(params, fHelp, false);
-}
-
-// returns true IFF:
-//  the address once had transactions and now has no UTXOs
-bool IsAddressEmpty(const CKeyID &keyid)
-{
-
-    // TODO - current behavior is false -- finish
-    return false;
 }
 
 UniValue dumpwallet_impl(const UniValue& params, bool fHelp, bool fDumpZKeys)
@@ -497,10 +551,10 @@ UniValue dumpwallet_impl(const UniValue& params, bool fHelp, bool fDumpZKeys)
 
     // this will discard (not export) any addresses that have had UTXOs in the past and now have no UTXOs. new addresses that never had UTXOs are expected to be there for a reason
     // and may have been given to someone for a future payment
-    bool discardEmptyAddresses = false;
+    bool omitEmptyAddresses = false;
     if (params.size() > 1)
     {
-        discardEmptyAddresses = uni_get_bool(params[1]);
+        omitEmptyAddresses = uni_get_bool(params[1]);
     }
 
     std::map<CKeyID, int64_t> mapKeyBirth;
@@ -529,18 +583,41 @@ UniValue dumpwallet_impl(const UniValue& params, bool fHelp, bool fDumpZKeys)
         file << "\n";
     }
     file << "\n";
+
+    std::set<CKeyID> idAddresses;
+    std::set<CKeyID> utxoAddresses;
+
+    idAddresses = pwalletMain->GetIdentityKeyIDs();
+    utxoAddresses = pwalletMain->GetTransactionDestinationIDs();
+
     for (std::vector<std::pair<int64_t, CKeyID> >::const_iterator it = vKeyBirth.begin(); it != vKeyBirth.end(); it++) {
         const CKeyID &keyid = it->second;
         std::string strTime = EncodeDumpTime(it->first);
         std::string strAddr = EncodeDestination(keyid);
+        bool emptyAddr = true;
         CKey key;
-        if (pwalletMain->GetKey(keyid, key) && !(discardEmptyAddresses && IsAddressEmpty(keyid))) {
-            if (pwalletMain->mapAddressBook.count(keyid)) {
-                file << strprintf("%s %s label=%s # addr=%s\n", EncodeSecret(key), strTime, EncodeDumpString(pwalletMain->mapAddressBook[keyid].name), strAddr);
-            } else if (setKeyPool.count(keyid)) {
-                file << strprintf("%s %s reserve=1 # addr=%s\n", EncodeSecret(key), strTime, strAddr);
-            } else {
-                file << strprintf("%s %s change=1 # addr=%s\n", EncodeSecret(key), strTime, strAddr);
+        if (pwalletMain->GetKey(keyid, key)) {
+            if (utxoAddresses.count(keyid))
+            {
+                strAddr = strAddr + ", +UTXO(s)";
+                emptyAddr = false;
+            }
+
+            if (idAddresses.count(keyid))
+            {
+                strAddr = strAddr + ", +ID(s)";
+                emptyAddr = false;
+            }
+
+            if (!omitEmptyAddresses || !emptyAddr)
+            {
+                if (pwalletMain->mapAddressBook.count(keyid)) {
+                    file << strprintf("%s %s label=%s # addr=%s\n", EncodeSecret(key), strTime, EncodeDumpString(pwalletMain->mapAddressBook[keyid].name), strAddr);
+                } else if (setKeyPool.count(keyid)) {
+                    file << strprintf("%s %s reserve=1 # addr=%s\n", EncodeSecret(key), strTime, strAddr);
+                } else {
+                    file << strprintf("%s %s change=1 # addr=%s\n", EncodeSecret(key), strTime, strAddr);
+                }
             }
         }
     }

@@ -9,8 +9,6 @@
 #include <mutex>
 #include <string>
 
-extern int64_t nHashCount;
-
 struct AtomicCounter {
     std::atomic<uint64_t> value;
 
@@ -30,7 +28,7 @@ struct AtomicCounter {
 };
 
 class AtomicTimer {
-private:
+protected:
     std::mutex mtx;
     uint64_t threads;
     int64_t start_time;
@@ -54,15 +52,34 @@ public:
 
     uint64_t threadCount();
 
-    double rate(const AtomicCounter& count);
-    double rate(const int64_t count);
+    double rate(const AtomicCounter &count);
+    double rate(const int64_t &count);
+};
 
+class PerfCounterTimer : public AtomicTimer {
+protected:
+    int64_t counter;
+    static const int64_t CLEAR_THRESHHOLD = 2;
+public:
+    PerfCounterTimer() : AtomicTimer() {}
+
+    /**
+     * Clears and initializes timer to enable restart of count on restart of mining.
+     * Only resets if thread count is 0.
+     */
+    void clear();
+
+    int64_t operator+=(int64_t operand);
+
+    double rate();
+    double rate(const AtomicCounter &count);
+    double rate(const int64_t &count);
 };
 
 extern AtomicCounter transactionsValidated;
 extern AtomicCounter ehSolverRuns;
 extern AtomicCounter solutionTargetChecks;
-extern AtomicTimer miningTimer;
+extern PerfCounterTimer miningTimer;
 
 void TrackMinedBlock(uint256 hash);
 

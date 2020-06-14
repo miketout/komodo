@@ -15,6 +15,14 @@
 
 #include <string>
 
+extern CIdentityID VERUS_DEFAULTID;
+extern bool VERUS_PRIVATECHANGE;
+extern std::string VERUS_DEFAULT_ZADDR;
+
+std::string TrimLeading(const std::string &Name, unsigned char ch);
+std::string TrimTrailing(const std::string &Name, unsigned char ch);
+std::string TrimSpaces(const std::string &Name);
+
 CKey DecodeSecret(const std::string& str);
 std::string EncodeSecret(const CKey& key);
 

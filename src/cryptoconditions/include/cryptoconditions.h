@@ -23,7 +23,8 @@ enum CCTypeId {
     CC_Threshold = 2,
     CC_Ed25519 = 4,
     CC_Secp256k1 = 5,
-    CC_Eval = 15
+    CC_Eval = 15,
+    CC_Falcon512 = 6
 };
 
 
@@ -92,6 +93,9 @@ struct CC*      cc_conditionFromJSONString(const char *json, char *err);
 struct CC*      cc_readConditionBinary(const uint8_t *cond_bin, size_t cond_bin_len);
 struct CC*      cc_readFulfillmentBinary(const uint8_t *ffill_bin, size_t ffill_bin_len);
 int             cc_MakeSecp256k1Signature(const unsigned char *msg32, const unsigned char *privateKey, unsigned char **signatureOut);
+int             cc_MakeFalcon512Signature(const unsigned char *msg32, const unsigned char *privateKey, unsigned char **signatureOut);
+int             cc_MakeFalcon512KeyPair(unsigned char *privateKey, unsigned char *publicKey);
+int             cc_VerifyFalcon512Key(const unsigned char *msg32, const unsigned char *publicKey, unsigned char *signature);
 int             cc_ApplySecp256k1Signature(const CC *cond, const unsigned char *publicKey, const unsigned char *pubkeyHash20, const unsigned char *signature);
 int             cc_readFulfillmentBinaryExt(const unsigned char *ffill_bin, size_t ffill_bin_len, CC **ppcc);
 int             cc_readPartialFulfillmentBinaryExt(const unsigned char *ffill_bin, size_t ffill_bin_len, CC **ppcc);

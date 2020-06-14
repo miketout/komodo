@@ -11,11 +11,10 @@
  * 
  */
 
-#include "pbaas/notarization.h"
-#include "pbaas/crosschainrpc.h"
-#include "rpc/pbaasrpc.h"
-#include "cc/CCinclude.h"
+#include <univalue.h>
 #include "main.h"
+#include "rpc/pbaasrpc.h"
+#include "pbaas/notarization.h"
 
 #include <assert.h>
 
@@ -28,69 +27,62 @@ extern string PBAAS_HOST;
 extern string PBAAS_USERPASS;
 extern int32_t PBAAS_PORT;
 
-CPBaaSNotarization::CPBaaSNotarization(const CTransaction &tx, bool validate)
+CPBaaSNotarization::CPBaaSNotarization(const CTransaction &tx, int32_t *pOutIdx) :
+                    nVersion(CURRENT_VERSION),
+                    protocol(CCurrencyDefinition::NOTARIZATION_AUTO),
+                    notarizationHeight(0),
+                    prevHeight(0),
+                    crossHeight(0)
 {
     // the PBaaS notarization itself is a combination of proper inputs, one output, and
     // a sequence of opret chain objects as proof of the output values on the chain to which the
     // notarization refers, the opret can be reconstructed from chain data in order to validate
     // the txid of a transaction that does not contain the opret itself
+
+    int32_t _outIdx;
+    int32_t &outIdx = pOutIdx ? *pOutIdx : _outIdx;
     
     // a notarization must have notarization output that spends to the address indicated by the 
     // ChainID, an opret, that there is only one, and that it can be properly decoded to a notarization 
     // output, whether or not validate is true
-    bool notarizationFound = false;
-    bool error = false;
-    for (auto out : tx.vout)
+    bool found = false;
+    for (int i = 0; i < tx.vout.size(); i++)
     {
-        uint32_t ecode;
-        if (out.scriptPubKey.IsPayToCryptoCondition(&ecode))
+        COptCCParams p;
+        if (tx.vout[i].scriptPubKey.IsPayToCryptoCondition(p) && 
+            p.IsValid() &&
+            (p.evalCode == EVAL_ACCEPTEDNOTARIZATION || p.evalCode == EVAL_EARNEDNOTARIZATION) &&
+            p.vData.size())
         {
-            if (ecode == EVAL_ACCEPTEDNOTARIZATION || ecode == EVAL_EARNEDNOTARIZATION)
+            if (found)
             {
-                if (notarizationFound)
-                {
-                    error = true;
-                    mmrRoot.SetNull();
-                }
-                else
-                {
-                    COptCCParams p;
-                    notarizationFound = true;
-
-                    // TODO: this only tells us it is a pay to CC tx. we need to validate ourselves after
-                    if (!IsPayToCryptoCondition(out.scriptPubKey, p, *this))
-                    {
-                        mmrRoot.SetNull();
-                    }
-                }
+                this->mmrRoot.SetNull();
+                break;
+            }
+            else
+            {
+                found = true;
+                outIdx = i;
+                ::FromVector(p.vData[0], *this);
             }
         }
-    }
-
-    // the following rules are enforced if validate is true:
-    // 1) must either have the chain definition output on output 0 or spend the notarization
-    //    thread for this chain.
-    // 2) must spend and distribute funds from the last validated notarization and invalidate
-    //    all invalidated notarizations, returning their payout to the notarization pool
-    // 3) all values in notarization must match the opret
-    // 4) all referenced objects must be consistent with this chain
-    // 5) validation output must either be spent as validated or unspent
-    //
-    if (validate)
-    {
-        
     }
 }
 
 CPBaaSNotarization::CPBaaSNotarization(const UniValue &obj)
 {
     nVersion = (uint32_t)uni_get_int(find_value(obj, "version"));
-    chainID.SetHex(uni_get_str(find_value(obj, "chainid")));
+
+    CTxDestination currencyIDDest = DecodeDestination(uni_get_str(find_value(obj, "currencyid")));
+    if (currencyIDDest.which() != COptCCParams::ADDRTYPE_INVALID)
+    {
+        currencyID = GetDestinationID(currencyIDDest);
+    }
 
     CBitcoinAddress notaryAddress(uni_get_str(find_value(obj, "notaryaddress")));
     CKeyID notaryKey;
     notaryAddress.GetKeyID(notaryKey);
-    notaryKeyID = notaryKey;
+    notaryDest = notaryKey;
 
     notarizationHeight = uni_get_int(find_value(obj, "notarizationheight"));
     mmrRoot = uint256S(uni_get_str(find_value(obj, "mmrroot")));
@@ -114,58 +106,35 @@ CPBaaSNotarization::CPBaaSNotarization(const UniValue &obj)
         vector<UniValue> nodeVec = nodesUni.getValues();
         for (auto node : nodeVec)
         {
-            nodes.push_back(CNodeData(uni_get_str(find_value(node, "networkaddress")), uni_get_str(find_value(node, "paymentaddress"))));
+            nodes.push_back(CNodeData(uni_get_str(find_value(node, "networkaddress")), uni_get_str(find_value(node, "nodeidentity"))));
         }
     }
 }
 
-UniValue CPBaaSNotarization::ToUniValue() const
-{
-    UniValue obj(UniValue::VOBJ);
-    obj.push_back(Pair("version", (int32_t)nVersion));
-    obj.push_back(Pair("chainid", chainID.GetHex()));
-    obj.push_back(Pair("notaryaddress", CBitcoinAddress(CKeyID(notaryKeyID)).ToString()));
-    obj.push_back(Pair("notarizationheight", (int32_t)notarizationHeight));
-    obj.push_back(Pair("mmrroot", mmrRoot.GetHex()));
-    obj.push_back(Pair("notarizationprehash", notarizationPreHash.GetHex()));
-    obj.push_back(Pair("work", ((UintToArith256(compactPower) << 128) >> 128).ToString()));
-    obj.push_back(Pair("stake", (UintToArith256(compactPower) >> 128).ToString()));
-    obj.push_back(Pair("currencystate", currencyState.ToUniValue()));
-    obj.push_back(Pair("prevnotarization", prevNotarization.GetHex()));
-    obj.push_back(Pair("prevheight", prevHeight));
-    obj.push_back(Pair("crossnotarization", crossNotarization.GetHex()));
-    obj.push_back(Pair("crossheight", crossHeight));
-    UniValue nodesUni(UniValue::VARR);
-    for (auto node : nodes)
-    {
-        nodesUni.push_back(node.ToUniValue());
-    }
-    obj.push_back(Pair("nodes", nodesUni));
-    return obj;
-}
-
-CNotarizationFinalization::CNotarizationFinalization(const CTransaction &tx, bool validate)
+CTransactionFinalization::CTransactionFinalization(const CTransaction &tx, uint32_t *pEcode, int32_t *pFinalizationOutNum)
 {
     bool found = false;
     bool error = false;
-    for (auto out : tx.vout)
+    int32_t finalizeOutNum = -1;
+    for (int i = 0; i < tx.vout.size() && !error; i++)
     {
-        uint32_t ecode;
-        if (out.scriptPubKey.IsPayToCryptoCondition(&ecode))
+        uint32_t _ecode;
+        uint32_t &ecode = pEcode ? *pEcode : _ecode;
+        if (tx.vout[i].scriptPubKey.IsPayToCryptoCondition(&ecode))
         {
-            if (ecode == EVAL_FINALIZENOTARIZATION)
+            if (ecode == EVAL_FINALIZE_NOTARIZATION || ecode == EVAL_FINALIZE_EXPORT)
             {
-                if (found)
+                if (finalizeOutNum != -1)
                 {
                     error = true;
-                    confirmedInput = -1;
+                    confirmedInput = finalizeOutNum = -1;
                 }
                 else
                 {
                     COptCCParams p;
-                    found = true;
+                    finalizeOutNum = i;
 
-                    if (!IsPayToCryptoCondition(out.scriptPubKey, p, *this))
+                    if (!IsPayToCryptoCondition(tx.vout[i].scriptPubKey, p, *this))
                     {
                         confirmedInput = -1;
                     }
@@ -173,10 +142,9 @@ CNotarizationFinalization::CNotarizationFinalization(const CTransaction &tx, boo
             }
         }
     }
-
-    if (validate)
+    if (!error && finalizeOutNum != -1 && pFinalizationOutNum)
     {
-        
+        *pFinalizationOutNum = finalizeOutNum;
     }
 }
 
@@ -367,6 +335,7 @@ vector<CInputDescriptor> AddSpendsAndFinalizations(CChainNotarizationData &cnd,
             if (!pcoinsTip->GetCoins(cnd.vtx[nidx].first, coins))
             {
                 // if this fails, we can't follow consensus and must fail
+                LogPrintf("%s: Cannot get coins to spend from finalized tx %s\n", __func__, cnd.vtx[nidx].first.GetHex().c_str());
                 return vector<CInputDescriptor>();
             }
             int k;
@@ -381,7 +350,7 @@ vector<CInputDescriptor> AddSpendsAndFinalizations(CChainNotarizationData &cnd,
                     {
                         pbn = CPBaaSNotarization(p.vData[0]);
                     }
-                    else if (p.evalCode == EVAL_FINALIZENOTARIZATION)
+                    else if (p.evalCode == EVAL_FINALIZE_NOTARIZATION)
                     {
                         break;
                     }
@@ -397,7 +366,7 @@ vector<CInputDescriptor> AddSpendsAndFinalizations(CChainNotarizationData &cnd,
             if (nidx == confirmedIdx)
             {
                 *pConfirmedInput = mnewTx.vin.size() - 1;
-                *pConfirmedDest = CTxDestination(CKeyID(pbn.notaryKeyID));
+                *pConfirmedDest = pbn.notaryDest;
                 cnd.lastConfirmed = nidx;
             }
         }
@@ -421,7 +390,7 @@ bool GetNotarizationAndFinalization(int32_t ecode, CMutableTransaction mtx, CPBa
                 if (notarize) duplicate = true;
                 notarize = true;
             }
-            else if (p.evalCode == EVAL_FINALIZENOTARIZATION)
+            else if (p.evalCode == EVAL_FINALIZE_NOTARIZATION)
             {
                 *pFinalizeOutIndex = j;
                 if (finalize) duplicate = true;
@@ -432,7 +401,7 @@ bool GetNotarizationAndFinalization(int32_t ecode, CMutableTransaction mtx, CPBa
     return finalize && notarize && !duplicate;
 }
 
-// This assumes it is running on the PBaaS chain.
+// This assumes we are running on a PBaaS chain.
 // Creates a notarization that will be in the current block and use the prevMMR to prove the block before us
 // we refer to the transactions on the Verus chain and on our chain with which we agree, and if we have added the
 // 10th validation to a notarization in our lineage, we finalize it as validated and finalize any conflicting notarizations
@@ -458,22 +427,25 @@ bool CreateEarnedNotarization(CMutableTransaction &mnewTx, vector<CInputDescript
     UniValue txidArr(UniValue::VARR);
 
     std::vector<pair<CTransaction, uint256>> txes;
-    if (GetNotarizationData(VERUS_CHAINID, EVAL_EARNEDNOTARIZATION, cnd, &txes))
     {
-        if (cnd.IsConfirmed())
+        LOCK2(cs_main, mempool.cs);
+        if (GetNotarizationData(VERUS_CHAINID, EVAL_EARNEDNOTARIZATION, cnd, &txes))
         {
-            lastConfirmed = txes[cnd.lastConfirmed].first;
-        }
+            if (cnd.IsConfirmed())
+            {
+                lastConfirmed = txes[cnd.lastConfirmed].first;
+            }
 
-        // make an array of all possible txids on this chain
-        for (auto it : cnd.vtx)
-        {
-            txidArr.push_back(it.first.GetHex());
+            // make an array of all possible txids on this chain
+            for (auto it : cnd.vtx)
+            {
+                txidArr.push_back(it.first.GetHex());
+            }
         }
-    }
-    else if (height != 1)
-    {
-        return false;
+        else if (height != 1)
+        {
+            return false;
+        }
     }
 
     params.push_back(txidArr);
@@ -541,7 +513,7 @@ bool CreateEarnedNotarization(CMutableTransaction &mnewTx, vector<CInputDescript
                 notarizeOutIndex = j;
                 pbn = CPBaaSNotarization(p.vData[0]);
             }
-            else if (p.evalCode == EVAL_FINALIZENOTARIZATION)
+            else if (p.evalCode == EVAL_FINALIZE_NOTARIZATION)
             {
                 finalizeOutIndex = j;
             }
@@ -617,13 +589,15 @@ bool CreateEarnedNotarization(CMutableTransaction &mnewTx, vector<CInputDescript
     // to spend a coinbase instant spend
 
     CPBaaSNotarization crossNotarizaton(crossTx);
-    CPBaaSChainDefinition chainDef(crossTx);        // only matters if we get no cross notarization prior
-    if (crossNotarizaton.prevNotarization.IsNull() && !chainDef.IsValid())
+    std::vector<CCurrencyDefinition> chainDefs = CCurrencyDefinition::GetCurrencyDefinitions(crossTx);
+    if (chainDefs.size())
     {
         // must either have a prior notarization or be the definition
         printf("%s: no prior notarization and no chain definition in cross notarization\n", __func__);
         return false;
     }
+
+    CCurrencyDefinition chainDef = chainDefs[0];
 
     pbn.prevNotarization = lastNotarizationID;
     if (lastNotarizationID.IsNull())
@@ -669,26 +643,42 @@ bool CreateEarnedNotarization(CMutableTransaction &mnewTx, vector<CInputDescript
 
     CCcontract_info CC;
     CCcontract_info *cp;
-    vector<CTxDestination> vKeys;
+    std::vector<CTxDestination> dests;
+    std::vector<CTxDestination> indexDests;
 
     // make the earned notarization output
     cp = CCinit(&CC, EVAL_EARNEDNOTARIZATION);
-    CPubKey pk(ParseHex(CC.CChexstr));
 
-    vKeys.push_back(CTxDestination(CKeyID(CCrossChainRPCData::GetConditionID(VERUS_CHAINID, EVAL_EARNEDNOTARIZATION))));
-    mnewTx.vout[notarizeOutIndex] = MakeCC1of1Vout(EVAL_EARNEDNOTARIZATION, PBAAS_MINNOTARIZATIONOUTPUT, pk, vKeys, pbn);
+    if (chainDef.notarizationProtocol == chainDef.NOTARIZATION_NOTARY_CHAINID)
+    {
+        dests = std::vector<CTxDestination>({CIdentityID(chainDef.GetID())});
+    }
+    else
+    {
+        dests = std::vector<CTxDestination>({CPubKey(ParseHex(CC.CChexstr))});
+    }
+
+    indexDests = std::vector<CTxDestination>({CKeyID(CCrossChainRPCData::GetConditionID(VERUS_CHAINID, EVAL_EARNEDNOTARIZATION))});
+    mnewTx.vout[notarizeOutIndex] = CTxOut(PBAAS_MINNOTARIZATIONOUTPUT, 
+                                           MakeMofNCCScript(CConditionObj<CPBaaSNotarization>(EVAL_EARNEDNOTARIZATION, dests, 1, &pbn), &indexDests));
     
     // make the finalization output
-    cp = CCinit(&CC, EVAL_FINALIZENOTARIZATION);
-    pk = CPubKey(ParseHex(CC.CChexstr));
+    cp = CCinit(&CC, EVAL_FINALIZE_NOTARIZATION);
+
+    // if not centrally controlled, change pubkey
+    if (chainDef.notarizationProtocol != chainDef.NOTARIZATION_NOTARY_CHAINID)
+    {
+        dests = std::vector<CTxDestination>({CPubKey(ParseHex(CC.CChexstr))});
+    }
 
     // we need to store the input that we confirmed if we spent finalization outputs
-    CNotarizationFinalization nf(*pConfirmedInput);
+    CTransactionFinalization nf(*pConfirmedInput);
 
-    vKeys[0] = CTxDestination(CKeyID(CCrossChainRPCData::GetConditionID(VERUS_CHAINID, EVAL_FINALIZENOTARIZATION)));
+    indexDests = std::vector<CTxDestination>({CKeyID(CCrossChainRPCData::GetConditionID(VERUS_CHAINID, EVAL_FINALIZE_NOTARIZATION))});
 
     // update crypto condition with final notarization output data
-    mnewTx.vout[finalizeOutIndex] = MakeCC1of1Vout(EVAL_FINALIZENOTARIZATION, PBAAS_MINNOTARIZATIONOUTPUT, pk, vKeys, nf);
+    mnewTx.vout[finalizeOutIndex] = CTxOut(PBAAS_MINNOTARIZATIONOUTPUT, 
+                                           MakeMofNCCScript(CConditionObj<CTransactionFinalization>(EVAL_FINALIZE_NOTARIZATION, dests, 1, &nf), &indexDests));
 
     // if this is block 1, add chain definition output with updated currency numbers
 
@@ -735,9 +725,9 @@ bool ValidateEarnedNotarization(CTransaction &ntx, CPBaaSNotarization *notarizat
         LogPrintf("%s: called from %s chain\n", __func__, ASSETCHAINS_SYMBOL);
         return false;
     }
-    else if (n.chainID != VERUS_CHAINID || !ntx.vout.size() || !ntx.vout.back().scriptPubKey.IsOpReturn())
+    else if (n.currencyID != VERUS_CHAINID || !ntx.vout.size() || !ntx.vout.back().scriptPubKey.IsOpReturn())
     {
-        LogPrintf("%s: earned notarization for chain %s for unrecognized chain ID %s\n", __func__, VERUS_CHAINNAME, n.chainID.GetHex().c_str());
+        LogPrintf("%s: earned notarization for chain %s for unrecognized chain ID %s\n", __func__, VERUS_CHAINNAME, n.currencyID.GetHex().c_str());
         return false;
     }
 
@@ -747,213 +737,101 @@ bool ValidateEarnedNotarization(CTransaction &ntx, CPBaaSNotarization *notarizat
     // first object should be a header that is either PoS on this chain, or header ref and mined with a block hash that could meet the
     // requirements of the block in our notary chain
     bool retVal = false;
+    CCrossChainProof notarizationProof;
 
     // all earned notarizations have chain objects, one header/headerref, one tx, and two proofs at least
-    if (chainObjects.size() != 5 ||
-        (chainObjects[0]->objectType != CHAINOBJ_HEADER && chainObjects[0]->objectType != CHAINOBJ_HEADER_REF) || 
-        chainObjects[1]->objectType != CHAINOBJ_PROOF || 
-        chainObjects[2]->objectType != CHAINOBJ_TRANSACTION || 
-        chainObjects[3]->objectType != CHAINOBJ_PROOF || 
-        chainObjects[4]->objectType != CHAINOBJ_PRIORBLOCKS)
+    if (chainObjects.size() != 1 ||
+        chainObjects[0]->objectType != CHAINOBJ_CROSSCHAINPROOF ||
+        (notarizationProof = ((CChainObject<CCrossChainProof> *)chainObjects[0])->object).chainObjects.size() < 3 ||
+        !(notarizationProof.chainObjects[0]->objectType == CHAINOBJ_HEADER || notarizationProof.chainObjects[0]->objectType == CHAINOBJ_HEADER_REF) ||
+        !(notarizationProof.chainObjects[1]->objectType == CHAINOBJ_TRANSACTION_PROOF) ||
+        !(notarizationProof.chainObjects[2]->objectType == CHAINOBJ_PRIORBLOCKS))
     {
         LogPrintf("%s: notarization must contain at least one block and one transaction proof\n", __func__);
     }
     else
     {
         // make a reference to the block header, either the full POS header, or a reconstructed, merge mined header
+        CBlockHeaderProof *bhp = nullptr;
+        CBlockHeaderAndProof *bhap = nullptr;
+
         CBlockHeader *pbh = NULL;
         CBlockHeader blockHeader;
-        if (chainObjects[0]->objectType == CHAINOBJ_HEADER)
+
+        uint256 mmrProofResult;
+
+        // either POS and a full header + proof, or merge mined and only a header ref + proof
+        if (notarizationProof.chainObjects[0]->objectType == CHAINOBJ_HEADER)
         {
-            pbh = &((CChainObject<CBlockHeader> *)chainObjects[0])->object;
+            bhap = &((CChainObject<CBlockHeaderAndProof> *)notarizationProof.chainObjects[0])->object;
+            blockHeader = bhap->blockHeader;
+            pbh = &blockHeader;
+            mmrProofResult = bhap->ValidateBlockHash(pbh->GetHash(), bhap->BlockNum());
+            if (bhap->ValidateBlockMMRRoot(bhap->BlockPreHeader().hashBlockMMRRoot, bhap->BlockNum()) != mmrProofResult)
+            {
+                LogPrintf("%s: POS block header proof failure for block %s at height %d\n", __func__, pbh->GetHash().GetHex().c_str(), bhap->BlockNum());
+                pbh = nullptr;
+            }
+            // TODO: prove and validate POS header source and entropy
         }
         else
         {
-            auto it = mapBlockIndex.find(n.opRetProof.hashes[0]);
-            if (it != mapBlockIndex.end())
+            bhp = &((CChainObject<CBlockHeaderProof> *)notarizationProof.chainObjects[0])->object;
+            auto blockIt = mapBlockIndex.find(bhp->BlockHash());
+            if (blockIt == mapBlockIndex.end())
             {
-                blockHeader = it->second->GetBlockHeader();
-                ((CChainObject<CPBaaSPreHeader> *)chainObjects[0])->object.SetBlockData(blockHeader);
-                pbh = &blockHeader;
+                LogPrintf("%s: Expected merge mined block not found\n", __func__);
+                pbh = nullptr;
+            }
+            else
+            {
+                // convert header to alternate chain
+                *pbh = bhp->NonCanonicalHeader(*pbh);
+                mmrProofResult = bhp->ValidateBlockHash(bhp->BlockHash(), bhp->BlockNum());
+                if (bhp->ValidateBlockMMRRoot(bhap->BlockPreHeader().hashBlockMMRRoot, bhp->BlockNum()) != mmrProofResult)
+                {
+                    LogPrintf("%s: Merge mined block header proof failure for block %s at height %d\n", __func__, pbh->GetHash().GetHex().c_str(), bhap->BlockNum());
+                    pbh = nullptr;
+                }
             }
         }
+
         if (pbh)
         {
             CBlockHeader &bh = *pbh;
 
-            CMerkleBranch &blockProof = ((CChainObject<CMerkleBranch> *)chainObjects[1])->object;
-            CTransaction &cntx = ((CChainObject<CTransaction> *)chainObjects[2])->object;
-            CMerkleBranch &cntxProof = ((CChainObject<CMerkleBranch> *)chainObjects[3])->object;
+            CPartialTransactionProof &txProof = ((CChainObject<CPartialTransactionProof> *)notarizationProof.chainObjects[1])->object;
+            CPriorBlocksCommitment &priorBlocks = ((CChainObject<CPriorBlocksCommitment> *)notarizationProof.chainObjects[2])->object;
 
             arith_uint256 target;
             target.SetCompact(bh.nBits);
             uint256 blkHash = bh.GetHash();
             arith_uint256 arithHash = UintToArith256(blkHash);
+            bool fail = false;
 
-            if (blockProof.SafeCheck(blkHash) == pbn.mmrRoot && arithHash <= target)
+            if (mmrProofResult == pbn.mmrRoot && arithHash <= target)
             {
-                // block is correct, reconstruct op_ret and check tx
-                CMutableTransaction mcntx(cntx);
+                // block is correct, check tx
+                CTransaction notTx;
+                CPBaaSNotarization cpbn;
+                if (txProof.GetPartialTransaction(notTx) != mmrProofResult)
+                {
+                    LogPrintf("%s: prior notarization fails proof validation on its home chain\n", __func__);
+                    fail = true;
+                }
+                else
+                {
+                    // get prior cross notarization
+                    cpbn = CPBaaSNotarization(notTx);
+                }
 
-                // get prior cross notarization
-                CPBaaSNotarization cpbn(cntx);
-
-                if (!cpbn.IsValid() || cpbn.opRetProof.orIndex)
+                if (fail || !cpbn.IsValid() || cpbn.opRetProof.orIndex)
                 {
                     LogPrintf("%s: notarization must be valid and opret must start at index 0\n", __func__);
                 }
                 else
                 {
-                    // now assume true return and fall through on false
                     retVal = true;
-                    vector<CBaseChainObject *> chainObjs;
-
-                    // loop through the proof and locate elements on this chain to reconstruct
-                    for (int i = 0; i < cpbn.opRetProof.hashes.size() && retVal; i ++)
-                    {
-                        switch (cpbn.opRetProof.types[i])
-                        {
-                            // if chain object header, it should be PoS, merge mined headers are header refs
-                            case CHAINOBJ_HEADER:
-                            {
-                                auto it = mapBlockIndex.find(cpbn.opRetProof.hashes[i]);
-                                if (it == mapBlockIndex.end() ||
-                                    !it->second->IsVerusPOSBlock() ||
-                                    it->second->GetHeight() != cpbn.notarizationHeight)
-                                {
-                                    LogPrintf("%s: full block header in cross-notarization from %s should be PoS\n", __func__, VERUS_CHAINNAME.c_str());
-                                    retVal = false;
-                                }
-                                else if (!GetCompactPower(it->second->nNonce, it->second->nBits, it->second->nVersion) != UintToArith256(cpbn.compactPower))
-                                {
-                                    LogPrintf("%s: invalid chain power in cross-notarization from %s\n", __func__, VERUS_CHAINNAME.c_str());
-                                    retVal = false;
-                                }
-                                else
-                                {
-                                    CBlockHeader blk = it->second->GetBlockHeader();
-                                    chainObjs.push_back(new CChainObject<CBlockHeader>(CHAINOBJ_HEADER, blk));
-                                    if (!chainObjs.back())
-                                    {
-                                        chainObjs.pop_back();
-                                        retVal = false;
-                                    }
-                                }
-                                break;
-                            }
-
-                            // header refs are for merge mined headers and should also be on this chain
-                            case CHAINOBJ_HEADER_REF:
-                            {
-                                auto it = mapBlockIndex.find(cpbn.opRetProof.hashes[i]);
-                                if (it == mapBlockIndex.end())
-                                {
-                                    LogPrintf("%s: block in notarization from %s chain not found\n", __func__, VERUS_CHAINNAME.c_str());
-                                    retVal = false;
-                                }
-                                else
-                                {
-                                    CBlockHeader blk = it->second->GetBlockHeader();
-                                    CHeaderRef hr = CHeaderRef(blk);
-                                    chainObjs.push_back(new CChainObject<CHeaderRef>(CHAINOBJ_HEADER_REF, hr));
-                                    if (!chainObjs.back())
-                                    {
-                                        chainObjs.pop_back();
-                                        retVal = false;
-                                    }
-                                }
-                                break;
-                            }
-
-                            // we don't need proofs, since all objects are on this chain
-                            case CHAINOBJ_PROOF:
-                            {
-                            /*
-                                // if bock headers are merge mined, keep header refs, not headers
-
-                                // create and store the notarization proof of chain
-                                vector<CBaseChainObject *> chainObjects;
-                                COpRetProof orp;
-
-                                // first, provide the latest block header in the opret...
-                                CBlockHeader bh = chainActive[proofheight]->GetBlockHeader();
-                                CChainObject<CBlockHeader> latestHeaderObj(CHAINOBJ_HEADER, bh);
-                                chainObjects.push_back(&latestHeaderObj);
-                                orp.AddObject(CHAINOBJ_HEADER, chainActive[proofheight]->GetBlockHash());
-
-                                // prove it with the latest MMR root
-                                CChainObject<CMerkleBranch> latestHeaderProof(CHAINOBJ_PROOF, blockProof);
-                                chainObjects.push_back(&latestHeaderProof);
-                                orp.AddObject(bh, chainActive[proofheight]->GetBlockHash());
-
-                                // include the last notarization tx, minus its opret in the new notarization's opret
-                                CMutableTransaction mtx(tx);
-                                if (mtx.vout[mtx.vout.size() - 1].scriptPubKey.IsOpReturn())
-                                {
-                                    mtx.vout.pop_back();
-                                }
-                                CTransaction strippedTx(mtx);
-
-                                // get a proof of the prior notarizaton from the MMR root of this notarization
-                                CMerkleBranch txProof(txIndex, block.GetMerkleBranch(txIndex));
-                                chainActive.GetMerkleProof(mmv, txProof, prevHeight);
-
-                                // add the cross transaction from this chain to return
-                                CChainObject<CTransaction> strippedTxObj(CHAINOBJ_TRANSACTION, strippedTx);
-                                chainObjects.push_back(&strippedTxObj);
-                                orp.AddObject(CHAINOBJ_TRANSACTION, tx.GetHash());
-
-                                // add proof of the transaction
-                                CChainObject<CMerkleBranch> txProofObj(CHAINOBJ_PROOF, txProof);
-                                chainObjects.push_back(&txProofObj);
-                                orp.AddObject(CHAINOBJ_PROOF, txHash);
-
-                                // add the MMR block nodes between the last notarization and this one, containing root that combines merkle, block, and compact power hashes
-                                CPriorBlocksCommitment priorBlocks;
-                                int numPriorBlocks = proofheight - ourLast.crossHeight;
-
-                                if (numPriorBlocks > PBAAS_MAXPRIORBLOCKS || numPriorBlocks > (proofheight - 1))
-                                    numPriorBlocks = PBAAS_MAXPRIORBLOCKS > (proofheight - 1) ? ((proofheight - 1) < 1 ? 0 : (proofheight - 1)) : PBAAS_MAXPRIORBLOCKS;
-                            */
-                                // prove either a transaction or header, whichever is before us in the objects
-                                uint32_t objType = chainObjs.back()->objectType;
-                                if (objType == CHAINOBJ_HEADER_REF || objType == CHAINOBJ_HEADER)
-                                {
-                                    // TODO: make a proof that proves the block hash in the opRetProof from the indicated height
-                                }
-                                else if (objType == CHAINOBJ_TRANSACTION)
-                                {
-                                    // TODO: make a proof that proves the transaction hash in the opRetProof from the indicated block
-                                }
-                                else
-                                {
-                                    retVal = false;
-                                }
-                                break;
-                            }
-
-                            // we don't need proofs, since all objects are on this chain
-                            case CHAINOBJ_PRIORBLOCKS:
-                            {
-                                break;
-                            }
-
-                            case CHAINOBJ_TRANSACTION:
-                            {
-                                // TODO: get tansaction
-                                break;
-                            }
-
-                            default:
-                                LogPrintf("%s: notarization must be valid and opret must start at index 0\n", __func__);
-                                retVal = false;
-                        }
-                    }
-                    if (retVal)
-                    {
-                        // store chainObjs into reconstructed opRet and verify txid and proof of reconstructed transaction
-                    }
-                    DeleteOpRetObjects(chainObjs);
                 }
             }
         }
@@ -986,23 +864,22 @@ uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t h
         return nullRet;
     }
 
-    CPBaaSNotarization crosspbn(entx);
+    int32_t outputIndex;
+    CPBaaSNotarization crosspbn(entx, &outputIndex);
     if (!crosspbn.IsValid())
     {
         LogPrintf("%s: invalid earned notarization\n", __func__);
         return nullRet;
     }
 
-    vector<CBaseChainObject *> chainObjects;
-    CChainObject<CBlockHeader> latestHeaderObj;
-    CChainObject<CHeaderRef> latestHeaderObjRef;
-    CChainObject<CMerkleBranch> latestHeaderProof;
-    CChainObject<CTransaction> strippedTxObj;
-    CChainObject<CMerkleBranch> txProofObj;
+    CChainObject<CBlockHeaderAndProof> latestHeaderObj;
+    CChainObject<CBlockHeaderProof> latestHeaderObjRef;
+    CChainObject<CPartialTransactionProof> strippedTxObj;
     CChainObject<CPriorBlocksCommitment> priorBlocksObj;
 
     COpRetProof orp;
     CPBaaSNotarization pbn;
+    CCrossChainProof ccp;
     {
         LOCK(cs_main);
         if (height > chainActive.Height())
@@ -1010,6 +887,7 @@ uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t h
             LogPrintf("%s: height requested is greater than chain height\n", __func__);
             return nullRet;
         }
+
         // prepare a partial notarization with all that is needed from this PBaaS chain at the height requested
         // if it is from a mined block, prepare the notarization assuming merge mined block
         // it will be rejected if it was not successfully merge mined
@@ -1017,17 +895,37 @@ uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t h
         mmv.resize(height);
         uint256 preHash = mmv.mmr.GetNode(height).hash;
 
-        CMerkleBranch blockProof;
-        chainActive.GetBlockProof(mmv, blockProof, height);
-        CMerkleBranch txProof;
+        CMMRProof blockProof;
+        if (!chainActive.GetBlockProof(mmv, blockProof, height))
+        {
+            LogPrintf("%s: can't prove block\n", __func__);
+            return nullRet;
+        }
+
+        // if this is a POS header, include the whole header, if merge mined,
+        // only the proof and non-canonical data
+        if (blk.IsVerusPOSBlock())
+        {
+            ccp << CBlockHeaderAndProof(blockProof, blk);
+            orp.types.push_back(CHAINOBJ_HEADER);
+        }
+        else
+        {
+            ccp << CBlockHeaderProof(blockProof, blk);
+            orp.types.push_back(CHAINOBJ_HEADER_REF);
+        }
+        orp.hashes.push_back(blk.GetHash());
+
         uint256 txHash = entx.GetHash();
+        orp.types.push_back(CHAINOBJ_TRANSACTION_PROOF);
+        orp.hashes.push_back(txHash);
+
         int i;
         for (i = 0; i < blk.vtx.size(); i++)
         {
             if (blk.vtx[i].GetHash() == txHash)
             {
-                txProof.branch = blk.GetMerkleBranch(i);
-                txProof.nIndex = i;
+                ccp << blk.GetPartialTransactionProof(blk.vtx[i], i, std::vector<std::pair<int16_t, int16_t>>({{CTransactionHeader::TX_OUTPUT, outputIndex}}));
                 break;
             }
         }
@@ -1037,55 +935,6 @@ uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t h
             LogPrintf("%s: cannot locate earned notarization in block\n", __func__);
             return nullRet;
         }
-
-        chainActive.GetMerkleProof(mmv, txProof, height);
-
-        // if this is a POS header, include the whole header, if merge mined,
-        // only the header ref and pre-header
-        if (blk.IsVerusPOSBlock())
-        {
-            latestHeaderObj = CChainObject<CBlockHeader>(CHAINOBJ_HEADER, blk);
-            chainObjects.push_back(&latestHeaderObj);
-            orp.AddObject(CHAINOBJ_HEADER, blk.GetHash());
-        }
-        else
-        {
-            CHeaderRef hr(blk);
-            latestHeaderObjRef = CChainObject<CHeaderRef>(CHAINOBJ_HEADER_REF, hr);
-            chainObjects.push_back(&latestHeaderObjRef);
-            orp.AddObject(CHAINOBJ_HEADER_REF, blk.GetHash());
-        }
-
-        latestHeaderProof = CChainObject<CMerkleBranch>(CHAINOBJ_PROOF, blockProof);
-        chainObjects.push_back(&latestHeaderProof);
-        orp.AddObject(blk, chainActive[height]->GetBlockHash());
-
-        // we need to refer to the earned notarization as the cross transaction, and the prior cross
-        // transaction as the last matching transaction to confirm. we also need to ensure that when
-        // we are added as an accepted notarization, that there is no more recent earned notarization
-        // to do that, accepted notarizations will also include
-
-        // add the earned notarization as the cross transaction for this accepted notarization after stripping its op_return
-        CMutableTransaction mentx(entx);
-
-        if (mentx.vout[mentx.vout.size() - 1].scriptPubKey.IsOpReturn())
-        {
-            // remove the opret
-            mentx.vout.pop_back();
-        }
-        CTransaction strippedTx(mentx);
-
-        //printf("entx.vout size: %lu\n", entx.vout.size());
-        //printf("strippedTx.vout size: %lu\n", strippedTx.vout.size());
-
-        strippedTxObj = CChainObject<CTransaction>(CHAINOBJ_TRANSACTION, strippedTx);
-        chainObjects.push_back(&strippedTxObj);
-        orp.AddObject(CHAINOBJ_TRANSACTION, entx.GetHash());
-
-        // add proof of the transaction
-        txProofObj = CChainObject<CMerkleBranch>(CHAINOBJ_PROOF, txProof);
-        chainObjects.push_back(&txProofObj);
-        orp.AddObject(CHAINOBJ_PROOF, txHash);
 
         // add the MMR block nodes between the last notarization and this one, containing root that combines merkle, block, and compact power hashes
         CPriorBlocksCommitment priorBlocks;
@@ -1101,13 +950,14 @@ uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t h
             priorBlocks.priorBlocks.push_back(mmv.mmr.GetNode(height - i).hash);
         }
 
-        priorBlocksObj = CChainObject<CPriorBlocksCommitment>(CHAINOBJ_PRIORBLOCKS, priorBlocks);
-        chainObjects.push_back(&priorBlocksObj);
-        orp.AddObject(CHAINOBJ_PRIORBLOCKS, ::GetHash(priorBlocks));
+        ccp << priorBlocks;
+
+        orp.types.push_back(CHAINOBJ_PRIORBLOCKS);
+        orp.hashes.push_back(::GetHash(priorBlocks));
 
         pbn.nVersion = CPBaaSNotarization::CURRENT_VERSION;
-        pbn.chainID = ASSETCHAINS_CHAINID;
-        pbn.notaryKeyID = crosspbn.notaryKeyID;
+        pbn.currencyID = ASSETCHAINS_CHAINID;
+        pbn.notaryDest = crosspbn.notaryDest;
         pbn.notarizationHeight = height;
 
         auto node = mmv.GetRootNode();
@@ -1125,9 +975,6 @@ uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t h
         pbn.opRetProof = orp;
     }
 
-    // get node keys and addresses
-    const static int MAX_NODES = 2;
-
     {
         LOCK(cs_vNodes);
         if (!vNodes.empty())
@@ -1138,22 +985,23 @@ uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t h
                 vNodes[i]->copyStats(stats);
                 if (vNodes[i]->fSuccessfullyConnected && !vNodes[i]->fInbound)
                 {
-                    pbn.nodes.push_back(CNodeData(vNodes[i]->addr.ToString(), CKeyID(vNodes[i]->hashPaymentAddress)));
+                    pbn.nodes.push_back(CNodeData(vNodes[i]->addr.ToString(), vNodes[i]->hashPaymentAddress));
                 }
             }
         }
     }
 
     // reduce number to max by removing randomly
-    while (pbn.nodes.size() > MAX_NODES)
+    while (pbn.nodes.size() > CPBaaSNotarization::MAX_NODES)
     {
         int toErase = GetRandInt(pbn.nodes.size() - 1);
         pbn.nodes.erase(pbn.nodes.begin() + toErase);
     }
 
-    CScript opRet = StoreOpRetArray(chainObjects);
+    CChainObject<CCrossChainProof> chainProof(CHAINOBJ_CROSSCHAINPROOF, ccp);
+    CScript opRet = StoreOpRetArray(std::vector<CBaseChainObject *>({&chainProof}));
 
-    // we are ready to create a transaction to send to the other chain
+    // ready to create a transaction to send to the other chain
 
     // setup to create the accepted notarization transaction
     CMutableTransaction mnewTx = CreateNewContextualCMutableTransaction(Params().GetConsensus(), height);
@@ -1161,16 +1009,25 @@ uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t h
     // create notarization output
     CCcontract_info CC;
     CCcontract_info *cp;
-    vector<CTxDestination> vKeys;
+
+    std::vector<CTxDestination> dests;
+    std::vector<CTxDestination> indexDests;
 
     // make the accepted notarization output
     cp = CCinit(&CC, EVAL_ACCEPTEDNOTARIZATION);
 
-    CPubKey pk(ParseHex(CC.CChexstr));
+    if (ConnectedChains.ThisChain().notarizationProtocol == CCurrencyDefinition::NOTARIZATION_NOTARY_CHAINID)
+    {
+        dests = std::vector<CTxDestination>({CIdentityID(ASSETCHAINS_CHAINID)});
+    }
+    else
+    {
+        dests = std::vector<CTxDestination>({CPubKey(ParseHex(CC.CChexstr))});
+    }
 
-    // make a notarization out
-    vKeys.push_back(CTxDestination(CKeyID(CCrossChainRPCData::GetConditionID(ASSETCHAINS_CHAINID, EVAL_ACCEPTEDNOTARIZATION))));
-    mnewTx.vout.push_back(MakeCC1of1Vout(EVAL_ACCEPTEDNOTARIZATION, PBAAS_MINNOTARIZATIONOUTPUT, pk, vKeys, pbn));
+    indexDests = std::vector<CTxDestination>({CKeyID(CCrossChainRPCData::GetConditionID(ASSETCHAINS_CHAINID, EVAL_ACCEPTEDNOTARIZATION))});
+    mnewTx.vout.push_back(CTxOut(PBAAS_MINNOTARIZATIONOUTPUT, 
+                                 MakeMofNCCScript(CConditionObj<CPBaaSNotarization>(EVAL_EARNEDNOTARIZATION, dests, 1, &pbn), &indexDests)));
 
     mnewTx.vout.push_back(CTxOut(0, opRet));
 
@@ -1282,6 +1139,6 @@ bool IsFinalizeNotarizationInput(const CScript &scriptSig)
 {
     // this is an output check, and is incorrect. need to change to input
     uint32_t ecode;
-    return scriptSig.IsPayToCryptoCondition(&ecode) && ecode == EVAL_FINALIZENOTARIZATION;
+    return scriptSig.IsPayToCryptoCondition(&ecode) && ecode == EVAL_FINALIZE_NOTARIZATION;
 }
 

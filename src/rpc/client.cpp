@@ -3,16 +3,12 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
-#include "rpc/client.h"
+#include <univalue.h>
 #include "rpc/protocol.h"
 #include "pbaas/crosschainrpc.h"
 #include "pbaas/identity.h"
+#include "rpc/client.h"
 #include "util.h"
-
-#include <set>
-#include <stdint.h>
-
-#include <univalue.h>
 
 using namespace std;
 extern std::string VERUS_CHAINNAME;
@@ -31,8 +27,14 @@ UniValue RPCCallRoot(const string& strMethod, const UniValue& params, int timeou
     return NullUniValue;
 }
 
-bool SetThisChain(UniValue &chainDefinition) {
+bool SetThisChain(const UniValue &chainDefinition) {
     return true; // (?) pbaas/pbaas.h
+}
+
+// non-functional in client
+uint256 CurrencyDefHash(UniValue &chainDefinition)
+{
+    return uint256();
 }
 
 int32_t uni_get_int(UniValue uv, int32_t def)
@@ -51,7 +53,28 @@ bool uni_get_bool(UniValue uv, bool def)
 {
     try
     {
-        return uv.get_bool();
+        if (uv.isStr())
+        {
+            std::string boolStr;
+            if ((boolStr = uni_get_str(uv, def ? "true" : "false")) == "true" || boolStr == "1")
+            {
+                return true;
+            }
+            else if (boolStr == "false" || boolStr == "0")
+            {
+                return false;
+            }
+            return def;
+        }
+        else if (uv.isNum())
+        {
+            return uv.get_int() != 0;
+        }
+        else
+        {
+            return uv.get_bool();
+        }
+        return false;
     }
     catch(const std::exception& e)
     {
@@ -149,7 +172,9 @@ std::string TrimTrailing(const std::string &Name, unsigned char ch)
     return nameCopy;
 }
 
-std::vector<std::string> ParseSubNames(const std::string &Name, std::string &ChainOut, bool displayfilter)
+// this will add the current Verus chain name to subnames if it is not present
+// on both id and chain names
+std::vector<std::string> ParseSubNames(const std::string &Name, std::string &ChainOut, bool displayfilter, bool addVerus)
 {
     std::string nameCopy = Name;
     std::string invalidChars = "\\/:*?\"<>|";
@@ -182,6 +207,25 @@ std::vector<std::string> ParseSubNames(const std::string &Name, std::string &Cha
     nameCopy = retNames[0];
     boost::split(retNames, nameCopy, boost::is_any_of("."));
 
+    int numRetNames = retNames.size();
+
+    if (addVerus)
+    {
+        if (explicitChain)
+        {
+            std::vector<std::string> chainOutNames;
+            boost::split(chainOutNames, ChainOut, boost::is_any_of("."));
+            if (boost::to_lower_copy(chainOutNames.back()) != boost::to_lower_copy(VERUS_CHAINNAME))
+            {
+                chainOutNames.push_back(VERUS_CHAINNAME);
+            }
+        }
+        if (boost::to_lower_copy(retNames.back()) != boost::to_lower_copy(VERUS_CHAINNAME))
+        {
+            retNames.push_back(VERUS_CHAINNAME);
+        }
+    }
+
     for (int i = 0; i < retNames.size(); i++)
     {
         if (retNames[i].size() > KOMODO_ASSETCHAIN_MAXLEN - 1)
@@ -195,24 +239,16 @@ std::vector<std::string> ParseSubNames(const std::string &Name, std::string &Cha
         }
     }
 
-    // if no chain is specified, default to chain of the ID
+    // if no explicit chain is specified, default to chain of the ID
     if (!explicitChain && retNames.size())
     {
-        if (retNames.size() == 1)
+        for (int i = 1; i < retNames.size(); i++)
         {
-            // by default, we assume the Verus chain for no suffix
-            ChainOut = VERUS_CHAINNAME;
-        }
-        else
-        {
-            for (int i = 1; i < retNames.size(); i++)
+            if (ChainOut.size())
             {
-                if (ChainOut.size())
-                {
-                    ChainOut = ChainOut + ".";
-                }
-                ChainOut = ChainOut + retNames[i];
+                ChainOut = ChainOut + ".";
             }
+            ChainOut = ChainOut + retNames[i];
         }
     }
 
@@ -301,10 +337,20 @@ CIdentityID CIdentity::GetID() const
     return GetID(name);
 }
 
-uint160 CCrossChainRPCData::GetChainID(std::string name)
+uint160 CCrossChainRPCData::GetID(std::string name)
 {
     uint160 parent;
     return CIdentity::GetID(name,parent);
+}
+
+UniValue ValueFromAmount(const CAmount& amount)
+{
+    bool sign = amount < 0;
+    int64_t n_abs = (sign ? -amount : amount);
+    int64_t quotient = n_abs / COIN;
+    int64_t remainder = n_abs % COIN;
+    return UniValue(UniValue::VNUM,
+            strprintf("%s%d.%08d", sign ? "-" : "", quotient, remainder));
 }
 
 static const CRPCConvertParam vRPCConvertParams[] =
@@ -442,9 +488,9 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "height_MoM", 1},
     { "calc_MoM", 2},
     // pbaas
-    { "definechain", 0},
-    { "getdefinedchains", 0},
-    { "sendreserve", 0},
+    { "definecurrency", 0},
+    { "listcurrencies", 0},
+    { "sendcurrency", 1},
     { "registeridentity", 0},
     { "updateidentity", 0},
     { "recoveridentity", 0},

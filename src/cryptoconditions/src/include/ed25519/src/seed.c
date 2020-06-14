@@ -30,8 +30,12 @@ int ed25519_create_seed(unsigned char *seed) {
         return 1;
     }
 
-    fread(seed, 1, 32, f);
+    size_t fread_size = fread(seed, 1, 32, f);
+      
     fclose(f);
+    if (fread_size == 0) {
+        return 1;
+    }
 #endif
 
     return 0;

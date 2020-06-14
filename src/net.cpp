@@ -429,6 +429,7 @@ void CNode::CloseSocketDisconnect()
         vRecvMsg.clear();
 }
 
+
 void CNode::PushVersion()
 {
     int nBestHeight = g_signals.GetHeight().get_value_or(0);
@@ -442,7 +443,9 @@ void CNode::PushVersion()
     else
         LogPrint("net", "send version message: version %d, blocks=%d, us=%s, peer=%d\n", PROTOCOL_VERSION, nBestHeight, addrMe.ToString(), id);
 
-    if (CConstVerusSolutionVector::activationHeight.ActiveVersion(nBestHeight + 1) >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS)
+    //printf("net send version message: version %d, blocks=%d, us=%s, peer=%d\n", PROTOCOL_VERSION, nBestHeight, addrMe.ToString().c_str(), id);
+
+    if (PROTOCOL_VERSION >= MIN_PBAAS_VERSION)
     {
         CKeyID nodePaymentAddress;
         if (USE_EXTERNAL_PUBKEY)
@@ -454,7 +457,7 @@ void CNode::PushVersion()
             }
             LogPrint("net", "send PBaaS node payment pubkey hash -- pubkey: %s, hash: %s\n", NOTARY_PUBKEY, nodePaymentAddress.ToString());
         }
-        PushMessage("version", PROTOCOL_VERSION > MIN_PBAAS_VERSION ? PROTOCOL_VERSION : MIN_PBAAS_VERSION, 
+        PushMessage("version", PROTOCOL_VERSION, 
                     nLocalServices, nTime, addrYou, addrMe, nLocalHostNonce, nodePaymentAddress, strSubVersion, nBestHeight, true);
     }
     else
@@ -462,9 +465,6 @@ void CNode::PushVersion()
         PushMessage("version", PROTOCOL_VERSION, nLocalServices, nTime, addrYou, addrMe, nLocalHostNonce, strSubVersion, nBestHeight, true);
     }
 }
-
-
-
 
 
 std::map<CSubNet, int64_t> CNode::setBanned;

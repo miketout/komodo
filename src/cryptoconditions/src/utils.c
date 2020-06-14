@@ -24,6 +24,7 @@
 #include "asn/asn_application.h"
 #include "cryptoconditions.h"
 #include "internal.h"
+#include "include/falcon/falcon.h"
 
 
 static unsigned char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',

@@ -148,13 +148,18 @@ void CTxMemPool::addAddressIndex(const CTxMemPoolEntry &entry, const CCoinsViewC
         for (unsigned int j = 0; j < tx.vin.size(); j++) {
             const CTxIn input = tx.vin[j];
             const CTxOut &prevout = view.GetOutputFor(input);
-            CScript::ScriptType type = prevout.scriptPubKey.GetType();
-            if (type == CScript::UNKNOWN)
-                continue;
-
-            if (type == CScript::P2CC)
+            COptCCParams p;
+            if (prevout.scriptPubKey.IsPayToCryptoCondition(p))
             {
-                std::vector<CTxDestination> dests = prevout.scriptPubKey.GetDestinations();
+                std::vector<CTxDestination> dests;
+                if (p.IsValid())
+                {
+                    dests = p.GetDestinations();
+                }
+                else
+                {
+                    dests = prevout.scriptPubKey.GetDestinations();
+                }
                 for (auto dest : dests)
                 {
                     if (dest.which() != COptCCParams::ADDRTYPE_INVALID)
@@ -168,6 +173,10 @@ void CTxMemPool::addAddressIndex(const CTxMemPoolEntry &entry, const CCoinsViewC
             }
             else
             {
+                CScript::ScriptType type = prevout.scriptPubKey.GetType();
+                if (type == CScript::UNKNOWN)
+                    continue;
+
                 CMempoolAddressDeltaKey key(type, prevout.scriptPubKey.AddressHash(), txhash, j, 1);
                 CMempoolAddressDelta delta(entry.GetTime(), prevout.nValue * -1, input.prevout.hash, input.prevout.n);
                 mapAddress.insert(make_pair(key, delta));
@@ -178,14 +187,19 @@ void CTxMemPool::addAddressIndex(const CTxMemPoolEntry &entry, const CCoinsViewC
 
     for (unsigned int j = 0; j < tx.vout.size(); j++) {
         const CTxOut &out = tx.vout[j];
-        CScript::ScriptType type = out.scriptPubKey.GetType();
-        if (type == CScript::UNKNOWN)
-            continue;
 
-
-        if (type == CScript::P2CC)
+        COptCCParams p;
+        if (out.scriptPubKey.IsPayToCryptoCondition(p))
         {
-            std::vector<CTxDestination> dests = out.scriptPubKey.GetDestinations();
+            std::vector<CTxDestination> dests;
+            if (p.IsValid())
+            {
+                dests = p.GetDestinations();
+            }
+            else
+            {
+                dests = out.scriptPubKey.GetDestinations();
+            }
             for (auto dest : dests)
             {
                 if (dest.which() != COptCCParams::ADDRTYPE_INVALID)
@@ -198,12 +212,15 @@ void CTxMemPool::addAddressIndex(const CTxMemPoolEntry &entry, const CCoinsViewC
         }
         else
         {
+            CScript::ScriptType type = out.scriptPubKey.GetType();
+            if (type == CScript::UNKNOWN)
+                continue;
+
             CMempoolAddressDeltaKey key(type, out.scriptPubKey.AddressHash(), txhash, j, 0);
             mapAddress.insert(make_pair(key, CMempoolAddressDelta(entry.GetTime(), out.nValue)));
             inserted.push_back(key);
         }
     }
-
     mapAddressInserted.insert(make_pair(txhash, inserted));
 }
 
@@ -855,7 +872,10 @@ void CTxMemPool::PrioritiseTransaction(const uint256 &hash, const string strHash
         deltas.first += dPriorityDelta;
         deltas.second += nFeeDelta;
     }
-    LogPrintf("PrioritiseTransaction: %s priority += %f, fee += %d\n", strHash, dPriorityDelta, FormatMoney(nFeeDelta));
+    if (fDebug)
+    {
+        LogPrintf("PrioritiseTransaction: %s priority += %f, fee += %d\n", strHash, dPriorityDelta, FormatMoney(nFeeDelta));
+    }
 }
 
 void CTxMemPool::ApplyDeltas(const uint256 hash, double &dPriorityDelta, CAmount &nFeeDelta)
@@ -884,7 +904,7 @@ bool CTxMemPool::PrioritiseReserveTransaction(const CReserveTransactionDescripto
     if (txDesc.IsValid())
     {
         mapReserveTransactions[hash] = txDesc;
-        CAmount feeDelta = currencyState.ReserveToNative(txDesc.ReserveFees() + txDesc.reserveConversionFees) + txDesc.nativeConversionFees;
+        CAmount feeDelta = txDesc.AllFeesAsNative(currencyState);
         PrioritiseTransaction(hash, hash.GetHex().c_str(), (double)feeDelta * 100.0, feeDelta);
         return true;
     }

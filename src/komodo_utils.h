@@ -24,7 +24,6 @@
 #include <boost/thread.hpp>
 #endif
 
-#define SATOSHIDEN ((uint64_t)100000000L)
 #define dstr(x) ((double)(x) / SATOSHIDEN)
 #define portable_mutex_t pthread_mutex_t
 #define portable_mutex_init(ptr) pthread_mutex_init(ptr,NULL)
@@ -1394,7 +1393,9 @@ void komodo_statefname(char *fname,char *symbol,char *str)
     //printf("test.(%s) -> [%s] statename.(%s) %s\n",test,ASSETCHAINS_SYMBOL,symbol,fname);
 }
 
-void komodo_configfile(char *symbol,uint16_t rpcport)
+// create a config file. if this is a PBaaS chain, we assume that the loaded CCurrencyDefinition is complete, which may not
+// be the case when loading without VRSC active.
+void komodo_configfile(char *symbol, uint16_t rpcport)
 {
     static char myusername[512],mypassword[7168];
     FILE *fp; uint16_t kmdport; uint8_t buf2[33]; char fname[512],buf[128],username[512],password[7168]; uint32_t crc,r,r2,i;
@@ -1431,16 +1432,17 @@ void komodo_configfile(char *symbol,uint16_t rpcport)
                 // add basic chain parameters for non-VRSC chains
                 if (_IsVerusActive())
                 {
+                    // add Verus Coin Foundation sponsored testnet nodes
                     if (PBAAS_TESTMODE)
                     {
-                        fprintf(fp,"addnode=%s\n", "185.25.48.72:17844");
-                        fprintf(fp,"addnode=%s\n", "185.64.105.111:17844");
+                        //fprintf(fp,"addnode=%s\n", "185.25.48.72:18969");
+                        //fprintf(fp,"addnode=%s\n", "185.64.105.111:18969");
                     }
                 }
                 else
                 {
                     const char *charPtr;
-                    // all basic coin parameters
+                    // basic coin parameters. the rest will come from block 1
                     fprintf(fp,"ac_algo=verushash\nac_veruspos=50\nac_cc=1\n");
                     fprintf(fp,"startblock=%d\n", ConnectedChains.thisChain.startBlock);
                     fprintf(fp,"endblock=%d\n", ConnectedChains.thisChain.endBlock);
@@ -1451,9 +1453,6 @@ void komodo_configfile(char *symbol,uint16_t rpcport)
                     fprintf(fp,"ac_eras=%s\n", (charPtr = mapArgs["-ac_eras"].c_str())[0] == 0 ? "1" : charPtr);
                     fprintf(fp,"ac_end=%s\n", (charPtr = mapArgs["-ac_end"].c_str())[0] == 0 ? "0" : charPtr);
                     fprintf(fp,"ac_options=%s\n", (charPtr = mapArgs["-ac_options"].c_str())[0] == 0 ? "0" : charPtr);
-                    fprintf(fp,"ac_minpreconvert=%s\n", (charPtr = mapArgs["-ac_minpreconvert"].c_str())[0] == 0 ? "0" : charPtr);
-                    fprintf(fp,"ac_maxpreconvert=%s\n", (charPtr = mapArgs["-ac_maxpreconvert"].c_str())[0] == 0 ? "0" : charPtr);
-                    fprintf(fp,"ac_conversion=%s\n", (charPtr = mapArgs["-ac_conversion"].c_str())[0] == 0 ? "0" : charPtr);
 
                     if (GetArg("-port", 0))
                     {
@@ -1625,7 +1624,7 @@ uint64_t komodo_ac_block_subsidy(int nHeight)
 
     // check for backwards compat, older chains with no explicit rewards had 0.0001 block reward
     if ( ASSETCHAINS_ENDSUBSIDY[0] == 0 && ASSETCHAINS_REWARD[0] == 0 )
-        subsidy = 10000;
+        subsidy = 0;
     else if ( (ASSETCHAINS_ENDSUBSIDY[0] == 0 && ASSETCHAINS_REWARD[0] != 0) || ASSETCHAINS_ENDSUBSIDY[0] != 0 )
     {
         // if we have an end block in the first era, find our current era
@@ -1695,8 +1694,9 @@ uint64_t komodo_ac_block_subsidy(int nHeight)
 }
 
 extern int64_t MAX_MONEY;
-extern std::string VERUS_CHEATCATCHER;
-bool SetThisChain(UniValue &chainDefinition);
+extern std::string VERUS_DEFAULT_ZADDR;
+bool SetThisChain(const UniValue &chainDefinition);
+const uint256 &CurrencyDefHash();
 
 void komodo_args(char *argv0)
 {
@@ -1740,7 +1740,7 @@ void komodo_args(char *argv0)
     } //else KOMODO_PAX = GetArg("-pax",0);
 
     // either the testmode parameter or calling this chain VRSCTEST will put us into testmode
-    PBAAS_TESTMODE = GetBoolArg("-testmode", true);
+    PBAAS_TESTMODE = GetBoolArg("-testmode", false);
 
     /*
     if ( argv0 != 0 )
@@ -1760,10 +1760,17 @@ void komodo_args(char *argv0)
     */
 
     // setting test mode also prevents the name of this chain from being set to VRSC
+
+    // for testnet release, default to testnet
     name = GetArg("-chain", name == "" ? "VRSC" : name);
+    //name = GetArg("-chain", name == "" ? "VRSC" : name);
+
     name = GetArg("-ac_name", name);
+
     if (PBAAS_TESTMODE && name == "VRSC")
     {
+        // for testnet release, default to testnet
+        name = "VRSCTEST";
         PBAAS_TESTMODE = false;
     }
     else if (name == "VRSCTEST" && !PBAAS_TESTMODE)
@@ -1772,6 +1779,10 @@ void komodo_args(char *argv0)
     }
 
     mapArgs["-ac_name"] = name;
+
+    ASSETCHAINS_ALGO = ASSETCHAINS_VERUSHASH;
+    ASSETCHAINS_LWMAPOS = 50;
+    ASSETCHAINS_STAKED = 0;
 
     bool paramsLoaded = false;
 
@@ -1792,6 +1803,10 @@ void komodo_args(char *argv0)
         mapArgs["-ac_timeunlockto"] = "1180800";
         mapArgs["-ac_veruspos"] = "50";
 
+        ASSETCHAINS_TIMELOCKGTE = 19200000000;
+        ASSETCHAINS_TIMEUNLOCKFROM = 129600;
+        ASSETCHAINS_TIMEUNLOCKTO = 1180800;
+
         if (!ReadConfigFile("VRSC", mapArgs, mapMultiArgs))
         {
             LogPrintf("Config file for %s not found.\n", name.c_str());
@@ -1805,11 +1820,16 @@ void komodo_args(char *argv0)
         mapArgs["-ac_supply"] = "5000000000000000";
         mapArgs["-ac_eras"] = "1";
         mapArgs["-ac_reward"] = "2400000000";
-        mapArgs["-ac_halving"] = GetArg("-ac_halving", "225697");    // allow testing easily with different values here
+        std::string halving = GetArg("-ac_halving", "225798"); // this assignment is required for an ARM compiler workaround
+        mapArgs["-ac_halving"] = halving;    // allow testing easily with different values here
         mapArgs["-ac_decay"] = "0";
         mapArgs["-ac_options"] = "8"; // OPTION_ID_REFERRALS
         mapArgs["-ac_end"] = "0";
         mapArgs["-ac_veruspos"] = "50";
+
+        ASSETCHAINS_TIMELOCKGTE = _ASSETCHAINS_TIMELOCKOFF;
+        ASSETCHAINS_TIMEUNLOCKFROM = 0;
+        ASSETCHAINS_TIMEUNLOCKTO = 0;
 
         if (!ReadConfigFile("VRSCTEST", mapArgs, mapMultiArgs))
         {
@@ -1846,12 +1866,12 @@ void komodo_args(char *argv0)
                 UniValue result;
                 try
                 {
-                    result = RPCCallRoot("getchaindefinition", params);
+                    result = RPCCallRoot("getcurrency", params);
                     // set local parameters
                     result = find_value(result, "result");
                     if (result.isNull() || !SetThisChain(result))
                     {
-                        throw error("Cannot find chain data");
+                        throw error("Cannot find blockchain data");
                     }
                     name = string(ASSETCHAINS_SYMBOL);
                     paramsLoaded = true;
@@ -1861,7 +1881,7 @@ void komodo_args(char *argv0)
                     if (result.size() > 0)
                     {
                         // load the mapArgs from the chain definition
-                        printf("getchaindefinition result:\n");
+                        printf("getcurrency result:\n");
                         auto keys = result.getKeys();
                         auto values = result.getValues();
                         for (int i = 0; i < keys.size(); i++)
@@ -1883,7 +1903,7 @@ void komodo_args(char *argv0)
     }
 
     VERUS_CHAINNAME = PBAAS_TESTMODE ? "VRSCTEST" : "VRSC";
-    VERUS_CHAINID = CCrossChainRPCData::GetChainID(VERUS_CHAINNAME);
+    VERUS_CHAINID = CCrossChainRPCData::GetID(VERUS_CHAINNAME);
 
     /*
     KOMODO_STOPAT = GetArg("-stopat",0);
@@ -1905,24 +1925,9 @@ void komodo_args(char *argv0)
 
     if ( name.size() )
     {
-        
         if (!paramsLoaded)
         {
-            std::string selectedAlgo = GetArg("-ac_algo", std::string(ASSETCHAINS_ALGORITHMS[1]));
-
-            int i;
-            for (i = 0; i < ASSETCHAINS_NUMALGOS; i++ ) // i is declared above and not tested properly below
-            {
-                if (std::string(ASSETCHAINS_ALGORITHMS[i]) == selectedAlgo)
-                {
-                    ASSETCHAINS_ALGO = i;
-                    break;
-                }
-            }
-            if (i == ASSETCHAINS_NUMALGOS)
-            {
-                printf("ASSETCHAINS_ALGO, %s not supported. using VerusHash\n", selectedAlgo.c_str());
-            }
+            ASSETCHAINS_ALGO = ASSETCHAINS_VERUSHASH;
 
             ASSETCHAINS_LASTERA = GetArg("-ac_eras", 1);
             if ( ASSETCHAINS_LASTERA < 1 || ASSETCHAINS_LASTERA > ASSETCHAINS_MAX_ERAS )
@@ -1931,16 +1936,6 @@ void komodo_args(char *argv0)
                 printf("ac_eras, if specified, must be between 1 and %u. ac_eras set to %u\n", ASSETCHAINS_MAX_ERAS, ASSETCHAINS_LASTERA);
             }
             ASSETCHAINS_LASTERA -= 1;
-
-            ASSETCHAINS_TIMELOCKGTE = (uint64_t)GetArg("-ac_timelockgte", _ASSETCHAINS_TIMELOCKOFF);
-            ASSETCHAINS_TIMEUNLOCKFROM = GetArg("-ac_timeunlockfrom", 0);
-            ASSETCHAINS_TIMEUNLOCKTO = GetArg("-ac_timeunlockto", 0);
-            if ( ASSETCHAINS_TIMEUNLOCKFROM > ASSETCHAINS_TIMEUNLOCKTO )
-            {
-                printf("ASSETCHAINS_TIMELOCKGTE - must specify valid ac_timeunlockfrom and ac_timeunlockto\n");
-                ASSETCHAINS_TIMELOCKGTE = _ASSETCHAINS_TIMELOCKOFF;
-                ASSETCHAINS_TIMEUNLOCKFROM = ASSETCHAINS_TIMEUNLOCKTO = 0;
-            }
 
             Split(GetArg("-ac_end",""),  ASSETCHAINS_ENDSUBSIDY, 0);
             Split(GetArg("-ac_reward",""),  ASSETCHAINS_REWARD, 0);
@@ -1966,23 +1961,11 @@ void komodo_args(char *argv0)
                 }
             }
 
-            if ( (ASSETCHAINS_STAKED= GetArg("-ac_staked",0)) > 100 )
-                ASSETCHAINS_STAKED = 100;
-
-            // for now, we only support 50% PoS due to other parts of the algorithm needing adjustment for
-            // other values
-            if ( (ASSETCHAINS_LWMAPOS = GetArg("-ac_veruspos", 50)) != 0 )
-                ASSETCHAINS_LWMAPOS = 50;
-
-            ASSETCHAINS_SUPPLY = GetArg("-ac_supply", 0);
-
             PBAAS_STARTBLOCK = GetArg("-startblock", 0);
             PBAAS_ENDBLOCK = GetArg("-endblock", 0);
 
-            PBAAS_PRECONVERSION = GetArg("-ac_conversion", 0);
-            PBAAS_MINPRECONVERT = GetArg("-ac_minpreconvert", 0);
-            PBAAS_MAXPRECONVERT = GetArg("-ac_maxpreconvert", 0);
-
+            // supply is the total of all pre-allocations
+            ASSETCHAINS_SUPPLY = GetArg("-ac_supply", 0);
             ASSETCHAINS_RPCHOST = GetArg("-rpchost", "127.0.0.1");
         }
 
@@ -2048,19 +2031,16 @@ void komodo_args(char *argv0)
             }
 
             // if we have extended PBaaS parameters
-            if ( PBAAS_STARTBLOCK || PBAAS_ENDBLOCK || PBAAS_PRECONVERSION )
+            if ( PBAAS_STARTBLOCK || PBAAS_ENDBLOCK )
             {
                 extralen += iguana_rwnum(1,&extraptr[extralen],sizeof(PBAAS_STARTBLOCK),(void *)&PBAAS_STARTBLOCK);
                 extralen += iguana_rwnum(1,&extraptr[extralen],sizeof(PBAAS_ENDBLOCK),(void *)&PBAAS_ENDBLOCK);
-                extralen += iguana_rwnum(1,&extraptr[extralen],sizeof(PBAAS_PRECONVERSION),(void *)&PBAAS_PRECONVERSION);
-                extralen += iguana_rwnum(1,&extraptr[extralen],sizeof(PBAAS_MINPRECONVERT),(void *)&PBAAS_MINPRECONVERT);
-                extralen += iguana_rwnum(1,&extraptr[extralen],sizeof(PBAAS_MAXPRECONVERT),(void *)&PBAAS_MAXPRECONVERT);
             }
 
             val = ASSETCHAINS_COMMISSION | (((uint64_t)ASSETCHAINS_STAKED & 0xff) << 32) | (((uint64_t)ASSETCHAINS_CC & 0xffff) << 40) | ((ASSETCHAINS_PUBLIC != 0) << 7) | ((ASSETCHAINS_PRIVATE != 0) << 6);
             extralen += iguana_rwnum(1,&extraptr[extralen],sizeof(val),(void *)&val);
 
-            if (ASSETCHAINS_LASTERA > 0 && ASSETCHAINS_ERAOPTIONS[0] & CPBaaSChainDefinition::OPTION_RESERVE)
+            if (ASSETCHAINS_LASTERA > 0 && ASSETCHAINS_ERAOPTIONS[0] & CCurrencyDefinition::OPTION_FRACTIONAL)
             {
                 uint32_t options = ASSETCHAINS_ERAOPTIONS[0];
                 extralen += iguana_rwnum(1, &extraptr[extralen], sizeof(options), (void *)&options);
@@ -2074,7 +2054,7 @@ void komodo_args(char *argv0)
         memset(ASSETCHAINS_SYMBOL, 0, sizeof(ASSETCHAINS_SYMBOL));
         strcpy(ASSETCHAINS_SYMBOL, name.c_str());
 
-        ASSETCHAINS_CHAINID = CCrossChainRPCData::GetChainID(std::string(ASSETCHAINS_SYMBOL));
+        ASSETCHAINS_CHAINID = CCrossChainRPCData::GetID(std::string(ASSETCHAINS_SYMBOL));
 
         MAX_MONEY = komodo_max_money();
 
@@ -2169,10 +2149,16 @@ void komodo_args(char *argv0)
             obj.push_back(Pair("nodes", nodes));
             */
 
-            obj.push_back(Pair("conversion", PBAAS_PRECONVERSION));
-            obj.push_back(Pair("minpreconvert", PBAAS_MINPRECONVERT));
-            obj.push_back(Pair("maxpreconvert", PBAAS_MAXPRECONVERT));
-
+            // we do not have pre-allocation data here, so fake one lump sum of pre-allocation to a NULL address
+            // this will get replaced from either block 1 of our chain, or a connection to VRSC
+            if (ASSETCHAINS_SUPPLY)
+            {
+                UniValue preallocArr(UniValue::VARR);
+                UniValue preallocObj(UniValue::VOBJ);
+                preallocObj.push_back(Pair("DestinationPending", ValueFromAmount((CAmount)ASSETCHAINS_SUPPLY)));
+                preallocArr.push_back(preallocObj);
+                obj.push_back(Pair("preallocation", preallocArr));
+            }
             SetThisChain(obj);
             paramsLoaded = true;
         }

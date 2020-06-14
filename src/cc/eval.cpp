@@ -16,8 +16,6 @@
 #include <assert.h>
 #include <cryptoconditions.h>
 
-#include "primitives/block.h"
-#include "primitives/transaction.h"
 #include "script/cc.h"
 #include "cc/eval.h"
 #include "cc/utils.h"
@@ -35,6 +33,7 @@ extern pthread_mutex_t KOMODO_CC_mutex;
 bool RunCCEval(const CC *cond, const CTransaction &tx, unsigned int nIn, bool fulfilled)
 {
     EvalRef eval;
+    // Verus commenting out Komodo lock since it is not used in Verus CCs, and other locks are
     pthread_mutex_lock(&KOMODO_CC_mutex);
     bool out = eval->Dispatch(cond, tx, nIn, fulfilled);
     pthread_mutex_unlock(&KOMODO_CC_mutex);
@@ -58,19 +57,6 @@ bool RunCCEval(const CC *cond, const CTransaction &tx, unsigned int nIn, bool fu
 bool DefaultCCContextualPreCheck(const CTransaction &tx, int32_t outNum, CValidationState &state, uint32_t height)
 {
     // make sure that if the destinations include identities that those identities are valid on this blockchain
-    std::vector<CTxDestination> dests;
-    int minSigs;
-    txnouttype outType;
-    if (ExtractDestinations(tx.vout[outNum].scriptPubKey, outType, dests, minSigs))
-    {
-        for (auto &dest : dests)
-        {
-            if (dest.which() == COptCCParams::ADDRTYPE_ID && !CIdentity::LookupIdentity(CIdentityID(GetDestinationID(dest))).IsValid())
-            {
-                return state.Error("Transaction destination includes invalid identity");
-            }
-        }
-    }
     return true;
 }
 
@@ -93,11 +79,11 @@ bool Eval::Dispatch(const CC *cond, const CTransaction &txTo, unsigned int nIn, 
     std::vector<uint8_t> vparams(cond->code+1, cond->code+cond->codeLength);
     switch ( ecode )
     {
-        case EVAL_PBAASDEFINITION:
+        case EVAL_CURRENCY_DEFINITION:
         case EVAL_SERVICEREWARD:
         case EVAL_EARNEDNOTARIZATION:
         case EVAL_ACCEPTEDNOTARIZATION:
-        case EVAL_FINALIZENOTARIZATION:
+        case EVAL_FINALIZE_NOTARIZATION:
         case EVAL_RESERVE_OUTPUT:
         case EVAL_RESERVE_EXCHANGE:
         case EVAL_RESERVE_TRANSFER:
@@ -105,6 +91,7 @@ bool Eval::Dispatch(const CC *cond, const CTransaction &txTo, unsigned int nIn, 
         case EVAL_CROSSCHAIN_EXPORT:
         case EVAL_CROSSCHAIN_IMPORT:
         case EVAL_CURRENCYSTATE:
+        case EVAL_FINALIZE_EXPORT:
             if (!chainActive.LastTip() || CConstVerusSolutionVector::activationHeight.ActiveVersion(chainActive.LastTip()->GetHeight() + 1) < CActivationHeight::ACTIVATE_PBAAS)
             {
                 // if chain is not able to process this yet, don't drop through to do so
@@ -118,7 +105,6 @@ bool Eval::Dispatch(const CC *cond, const CTransaction &txTo, unsigned int nIn, 
         case EVAL_IDENTITY_RESERVATION:
             if (!chainActive.LastTip() || CConstVerusSolutionVector::activationHeight.ActiveVersion(chainActive.LastTip()->GetHeight() + 1) < CActivationHeight::ACTIVATE_IDENTITY)
             {
-                // if chain is not able to process this yet, don't drop through to do so
                 break;
             }
 

@@ -60,8 +60,8 @@
 #ifndef PBAAS_NOTARIZATION_H
 #define PBAAS_NOTARIZATION_H
 
-#include "pbaas/pbaas.h"
 #include "key_io.h"
+#include "pbaas/pbaas.h"
 
 // This is the data for a PBaaS notarization transaction, either of a PBaaS chain into the Verus chain, or the Verus
 // chain into a PBaaS chain.
@@ -83,16 +83,19 @@ public:
     static const int FINAL_CONFIRMATIONS = 9;
     static const int MIN_BLOCKS_BETWEEN_ACCEPTED = 5;
     static const int CURRENT_VERSION = PBAAS_VERSION;
+    static const int MAX_NODES = 2;
+
     uint32_t nVersion;                      // PBAAS version
-    uint160 chainID;                        // chain being notarized
-    uint160 notaryKeyID;                    // confirmed notary rewards are spent to this address when this notarization is confirmed
+    int32_t protocol;                       // notarization protocol
+    uint160 currencyID;                       // currency being notarized
+    CTxDestination notaryDest;              // confirmed notary rewards are spent to this address when this notarization is confirmed
 
-    uint32_t notarizationHeight;            // height of the notarization we certify
+    uint32_t notarizationHeight;            // height (or sequence) of the notarization we certify
     uint256 mmrRoot;                        // latest MMR root of the notarization height
-    uint256 notarizationPreHash;            // combination of block hash, merkle root, and compact power for the notarization height
-    uint256 compactPower;                   // compact power of the block height notarization to compare
+    uint256 notarizationPreHash;            // combination of block hash, block MMR root, and compact power (or external proxy) for the notarization height
+    uint256 compactPower;                   // compact power (or external proxy) of the block height notarization to compare
 
-    CCurrencyState currencyState;           // currency state of this chain
+    CCoinbaseCurrencyState currencyState;   // currency state of this currency as of this notarization
 
     uint256 prevNotarization;               // txid of the prior notarization on this chain that we agree with, even those not accepted yet
     int32_t prevHeight;
@@ -105,23 +108,25 @@ public:
 
     CPBaaSNotarization() : nVersion(PBAAS_VERSION_INVALID) { }
 
-    CPBaaSNotarization(uint32_t version,
-                       uint160 chainid,
-                       uint160 notarykey,
+    CPBaaSNotarization(int32_t Protocol,
+                       const uint160 &currencyid,
+                       const CTxDestination &notaryDestination,
                        int32_t notarizationheight, 
-                       uint256 MMRRoot,
-                       uint256 preHash,
-                       uint256 compactpower,
-                       CCurrencyState currencystate,
-                       uint256 prevnotarization,
+                       const uint256 &MMRRoot,
+                       const uint256 &preHash,
+                       const uint256 &compactpower,
+                       const CCurrencyState &currencystate,
+                       const uint256 &prevnotarization,
                        int32_t prevheight,
-                       uint256 crossnotarization,
+                       const uint256 &crossnotarization,
                        int32_t crossheight,
-                       COpRetProof orp,
-                       std::vector<CNodeData> &Nodes) : 
+                       const COpRetProof &orp,
+                       const std::vector<CNodeData> &Nodes=std::vector<CNodeData>(),
+                       uint32_t version = CURRENT_VERSION) : 
                        nVersion(version),
-                       chainID(chainid),
-                       notaryKeyID(notarykey),
+                       currencyID(currencyid),
+                       protocol(Protocol),
+                       notaryDest(notaryDestination),
 
                        notarizationHeight(notarizationheight),
                        mmrRoot(MMRRoot),
@@ -144,7 +149,7 @@ public:
         ::FromVector(asVector, *this);
     }
 
-    CPBaaSNotarization(const CTransaction &tx, bool validate = false);
+    CPBaaSNotarization(const CTransaction &tx, int32_t *pOutIdx=nullptr);
 
     CPBaaSNotarization(const UniValue &obj);
 
@@ -153,8 +158,19 @@ public:
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(VARINT(nVersion));
-        READWRITE(chainID);
-        READWRITE(notaryKeyID);
+        READWRITE(currencyID);
+        READWRITE(protocol);
+        if (ser_action.ForRead())
+        {
+            CTransferDestination tDest;
+            READWRITE(tDest);
+            notaryDest = TransferDestinationToDestination(tDest);
+        }
+        else
+        {
+            CTransferDestination tDest(DestinationToTransferDestination(notaryDest));
+            READWRITE(tDest);
+        }
         READWRITE(notarizationHeight);
         READWRITE(mmrRoot);
         READWRITE(notarizationPreHash);
@@ -181,18 +197,19 @@ public:
     UniValue ToUniValue() const;
 };
 
-class CNotarizationFinalization
+class CTransactionFinalization
 {
 public:
+    static const int64_t DEFAULT_OUTPUT_VALUE = 100000;
     int32_t confirmedInput;
 
-    CNotarizationFinalization() : confirmedInput(-1) {}
-    CNotarizationFinalization(int32_t nIn) : confirmedInput(nIn) {}
-    CNotarizationFinalization(std::vector<unsigned char> vch)
+    CTransactionFinalization() : confirmedInput(-1) {}
+    CTransactionFinalization(int32_t nIn) : confirmedInput(nIn) {}
+    CTransactionFinalization(std::vector<unsigned char> vch)
     {
         ::FromVector(vch, *this);
     }
-    CNotarizationFinalization(const CTransaction &tx, bool validate=false);
+    CTransactionFinalization(const CTransaction &tx, uint32_t *pEcode=nullptr, int32_t *pFinalizationOutNum=nullptr);
 
     ADD_SERIALIZE_METHODS;
 

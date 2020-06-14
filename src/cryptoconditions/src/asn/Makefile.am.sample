@@ -29,12 +29,14 @@ ASN_MODULE_HEADERS=	\
 	RsaSha256Fulfillment.h	\
 	Ed25519Sha512Fulfillment.h	\
 	Secp256k1Fulfillment.h	\
+	Falcon512Fulfillment.h	\
 	EvalFulfillment.h	\
 	PrefixFingerprintContents.h	\
 	ThresholdFingerprintContents.h	\
 	RsaFingerprintContents.h	\
 	Ed25519FingerprintContents.h	\
-	Secp256k1FingerprintContents.h
+	Secp256k1FingerprintContents.h \
+	Falcon512FingerprintContents.h
 
 ASN_MODULE_HEADERS+=INTEGER.h
 ASN_MODULE_HEADERS+=NativeEnumerated.h

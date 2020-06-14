@@ -834,7 +834,7 @@ void komodo_connectblock(CBlockIndex *pindex,CBlock& block)
             numvouts = block.vtx[i].vout.size();
             notaryid = -1;
             voutmask = specialtx = notarizedheight = isratification = notarized = 0;
-            signedmask = (height < 91400) ? 1 : 0;
+            signedmask = (height < 91400) ? 1 : 0; // shouldn't this not apply to PBaaS chains?
             numvins = block.vtx[i].vin.size();
             for (j=0; j<numvins; j++)
             {

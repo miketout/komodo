@@ -77,7 +77,6 @@ private:
     ZCJoinSplit* sproutParams;
     const CCoinsViewCache* coinsView;
     CCriticalSection* cs_coinsView;
-    CMutableTransaction mtx;
     CAmount fee = 10000;
 
     std::vector<SpendDescriptionInfo> spends;
@@ -94,6 +93,8 @@ private:
     bool AddOpRetLast(CScript &s);
 
 public:
+    CMutableTransaction mtx;
+
     TransactionBuilder() {}
     TransactionBuilder(
         const Consensus::Params& consensusParams,

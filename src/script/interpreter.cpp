@@ -5,21 +5,15 @@
 
 #include <cryptoconditions.h>
 
-#include "interpreter.h"
 #include "standard.h"
 
 #include "consensus/upgrades.h"
 #include "primitives/transaction.h"
+#include "pbaas/pbaas.h"
 #include "cc/eval.h"
 #include "crypto/ripemd160.h"
 #include "crypto/sha1.h"
 #include "crypto/sha256.h"
-#include "pubkey.h"
-#include "script/script.h"
-#include "uint256.h"
-#include "pbaas/pbaas.h"
-#include "pbaas/identity.h"
-
 
 using namespace std;
 
@@ -1669,7 +1663,6 @@ int TransactionSignatureChecker::CheckCryptoCondition(
                 nHashType = signatures.sigHashType;
                 for (auto &sig : signatures.signatures)
                 {
-
                     if (sig.second.sigType != sig.second.SIGTYPE_SECP256K1 || !sig.second.signature.size() || !cc_ApplySecp256k1Signature(outputCC, sig.second.pubKeyData.data(), sig.first.begin(), sig.second.signature.data()))
                     {
                         success = false;
@@ -1878,7 +1871,6 @@ bool EvalCryptoConditionSig(
     return true;
 }
 
-
 bool VerifyScript(
     const CScript& scriptSig,
     const CScript& scriptPubKey,
@@ -1894,7 +1886,16 @@ bool VerifyScript(
     }
 
     vector<vector<unsigned char> > stack, stackCopy;
-    if (IsCryptoConditionsEnabled() && scriptPubKey.IsPayToCryptoCondition()) {
+    COptCCParams p;
+    if (IsCryptoConditionsEnabled() && scriptPubKey.IsPayToCryptoCondition(p)) {
+
+        //UniValue r;
+        //printf("eval code: %d, keys:\n", p.evalCode);
+        //for (auto &key : p.vKeys)
+        //{
+        //    printf("%s\n", EncodeDestination(key).c_str());
+        //}
+
         if (!EvalCryptoConditionSig(stack, scriptSig, serror))
             // serror is set
             return false;

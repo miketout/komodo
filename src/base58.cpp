@@ -219,6 +219,7 @@ public:
     bool operator()(const CPubKey& key) const { return addr->Set(key); }
     bool operator()(const CScriptID& id) const { return addr->Set(id); }
     bool operator()(const CIdentityID& id) const { return addr->Set(id); }
+    bool operator()(const CQuantumID& id) const { return addr->Set(id); }
     bool operator()(const CNoDestination& no) const { return false; }
 };
 
@@ -249,6 +250,12 @@ bool CBitcoinAddress::Set(const CIdentityID& id)
     return true;
 }
 
+bool CBitcoinAddress::Set(const CQuantumID& id)
+{
+    SetData(Params().Base58Prefix(CChainParams::QUANTUM_ADDRESS), &id, 20);
+    return true;
+}
+
 bool CBitcoinAddress::Set(const CTxDestination& dest)
 {
     return boost::apply_visitor(CBitcoinAddressVisitor(this), dest);
@@ -264,7 +271,8 @@ bool CBitcoinAddress::IsValid(const CChainParams& params) const
     bool fCorrectSize = vchData.size() == 20;
     bool fKnownVersion = vchVersion == params.Base58Prefix(CChainParams::PUBKEY_ADDRESS) ||
                          vchVersion == params.Base58Prefix(CChainParams::SCRIPT_ADDRESS) ||
-                         vchVersion == params.Base58Prefix(CChainParams::IDENTITY_ADDRESS);
+                         vchVersion == params.Base58Prefix(CChainParams::IDENTITY_ADDRESS) ||
+                         vchVersion == params.Base58Prefix(CChainParams::QUANTUM_ADDRESS);
     return fCorrectSize && fKnownVersion;
 }
 
@@ -306,6 +314,8 @@ CTxDestination CBitcoinAddress::Get() const
         return CScriptID(id);
     else if (vchVersion == Params().Base58Prefix(CChainParams::IDENTITY_ADDRESS))
         return CIdentityID(id);
+    else if (vchVersion == Params().Base58Prefix(CChainParams::QUANTUM_ADDRESS))
+        return CQuantumID(id);
     else
         return CNoDestination();
 }
@@ -325,6 +335,10 @@ bool CBitcoinAddress::GetIndexKey(uint160& hashBytes, int& type) const
     } else if (vchVersion == Params().Base58Prefix(CChainParams::SCRIPT_ADDRESS)) {
         memcpy(&hashBytes, &vchData[0], 20);
         type = CScript::P2SH;
+        return true;
+    } else if (vchVersion == Params().Base58Prefix(CChainParams::QUANTUM_ADDRESS)) {
+        memcpy(&hashBytes, &vchData[0], 20);
+        type = CScript::P2QRK;
         return true;
     }
 

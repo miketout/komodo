@@ -6,6 +6,7 @@
 #ifndef BITCOIN_SCRIPT_INTERPRETER_H
 #define BITCOIN_SCRIPT_INTERPRETER_H
 
+#include "univalue.h"
 #include "script_error.h"
 #include "pbaas/crosschainrpc.h"
 #include "primitives/transaction.h"

@@ -136,6 +136,12 @@ static bool HTTPReq_JSONRPC(HTTPRequest* req, const std::string &)
                 return false;
             }
 
+            extern bool printoutAPI;
+            if (printoutAPI ==  true)
+            {
+                printf("%s %s\n", jreq.strMethod.c_str(), jreq.params.write().c_str());
+            }
+
             UniValue result = tableRPC.execute(jreq.strMethod, jreq.params);
 
             // Send reply

@@ -20,9 +20,7 @@
 #include "httprpc.h"
 #include "key.h"
 #include "notarisationdb.h"
-#ifdef ENABLE_MINING
 #include "key_io.h"
-#endif
 #include "main.h"
 #include "metrics.h"
 #include "miner.h"
@@ -79,7 +77,7 @@ using namespace std;
 extern void ThreadSendAlert();
 extern int32_t KOMODO_LOADINGBLOCKS;
 extern bool VERUS_MINTBLOCKS;
-extern std::string VERUS_CHEATCATCHER;
+extern std::string VERUS_DEFAULT_ZADDR;
 
 ZCJoinSplit* pzcashParams = NULL;
 
@@ -1218,13 +1216,15 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV2, 310000);
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV3, 800200);
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV4, 800200);
+            CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV5, 1053660);
         }
         else if (strcmp(ASSETCHAINS_SYMBOL,"VRSCTEST") == 0)
         {
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV2, 1);
-            CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV3, 110);
-            CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV4, 110);
-            //CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV5, 110);
+            CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV3, 1);
+            CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV4, 1);
+            CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV5, 155);
+            CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV6, 1600);
         }
         else
         {
@@ -1232,12 +1232,34 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV3, 1);
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV4, 1);
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV5, 1);
+            CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV6, 1);
         }
     }
 
+    // get default IDs and addresses
+    auto defaultIDDest = DecodeDestination(GetArg("-defaultid", ""));
+    VERUS_DEFAULTID = defaultIDDest.which() == COptCCParams::ADDRTYPE_ID ? CIdentityID(GetDestinationID(defaultIDDest)) : CIdentityID();
+    VERUS_DEFAULT_ZADDR = GetArg("-cheatcatcher", "");
+    VERUS_DEFAULT_ZADDR = GetArg("-defaultzaddr", VERUS_DEFAULT_ZADDR);
+    // if we are supposed to catch stake cheaters, there must be a valid sapling parameter, we need it at
+    // initialization, and this is the first time we can get it. store the Sapling address here
+    extern boost::optional<libzcash::SaplingPaymentAddress> defaultSaplingDest;
+    libzcash::PaymentAddress addr = DecodePaymentAddress(VERUS_DEFAULT_ZADDR);
+    if (VERUS_DEFAULT_ZADDR.size() > 0 && IsValidPaymentAddress(addr))
+    {
+        try
+        {
+            defaultSaplingDest = boost::get<libzcash::SaplingPaymentAddress>(addr);
+        }
+        catch (...)
+        {
+        }
+    }
+    VERUS_PRIVATECHANGE = GetBoolArg("-privatechange", defaultSaplingDest == boost::none);
+
     // Sanity check
     if (!InitSanityCheck())
-        return InitError(_("Initialization sanity check failed. Komodo is shutting down."));
+        return InitError(_("Initialization sanity check failed. Verus is shutting down."));
 
     std::string strDataDir = GetDataDir().string();
 #ifdef ENABLE_WALLET
@@ -1253,9 +1275,9 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     try {
         static boost::interprocess::file_lock lock(pathLockFile.string().c_str());
         if (!lock.try_lock())
-            return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Komodo is probably already running."), strDataDir));
+            return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Verus is probably already running."), strDataDir));
     } catch(const boost::interprocess::interprocess_exception& e) {
-        return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Komodo is probably already running.") + " %s.", strDataDir, e.what()));
+        return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Verus is probably already running.") + " %s.", strDataDir, e.what()));
     }
 
 #ifndef _WIN32
@@ -1264,7 +1286,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     if (GetBoolArg("-shrinkdebugfile", !fDebug))
         ShrinkDebugFile();
     LogPrintf("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    LogPrintf("Komodo version %s (%s)\n", FormatFullVersion(), CLIENT_DATE);
+    LogPrintf("Verus version %s (%s)\n", FormatFullVersion(), CLIENT_DATE);
 
     if (fPrintToDebugLog)
         OpenDebugLog();
@@ -1579,25 +1601,21 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
             fReindex = true;
         }
 
-        checkval = DEFAULT_TIMESTAMPINDEX;
-        pblocktree->ReadFlag("timestampindex", checkval);
-        bool defaultState = DEFAULT_TIMESTAMPINDEX ? DEFAULT_TIMESTAMPINDEX : checkval;
-        fTimeStampIndex = GetBoolArg("-timestampindex", defaultState);
-        if (checkval != fTimeStampIndex)
+        fInsightExplorer = GetBoolArg("-insightexplorer", DEFAULT_INSIGHTEXPLORER);
+        pblocktree->ReadFlag("insightexplorer", checkval);
+        if ( checkval != fInsightExplorer )
         {
-            pblocktree->WriteFlag("timestampindex", fTimeStampIndex);
-            fprintf(stderr,"set timestamp index, will reindex. sorry will take a while.\n");
+            pblocktree->WriteFlag("insightexplorer", fInsightExplorer);
+            fprintf(stderr,"set insightexplorer, will reindex. sorry will take a while.\n");
             fReindex = true;
         }
 
-        checkval = DEFAULT_INSIGHTEXPLORER;
-        pblocktree->ReadFlag("insightexplorer", checkval);
-        defaultState = DEFAULT_INSIGHTEXPLORER ? DEFAULT_INSIGHTEXPLORER : checkval;
-        fInsightExplorer = GetBoolArg("-insightexplorer", defaultState);
-        if (checkval != fInsightExplorer)
+        fTimeStampIndex = GetBoolArg("-timestampindex", DEFAULT_TIMESTAMPINDEX);
+        pblocktree->ReadFlag("timestampindex", checkval);
+        if ( checkval != fTimeStampIndex )
         {
-            pblocktree->WriteFlag("insightexplorer", fInsightExplorer);
-            fprintf(stderr,"set main indexes, will reindex. sorry will take a while.\n");
+            pblocktree->WriteFlag("timestampindex", fTimeStampIndex);
+            fprintf(stderr,"set timestampindex, will reindex. sorry will take a while.\n");
             fReindex = true;
         }
     }
@@ -1658,7 +1676,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
                 }
 
                 // Check for changed -insightexplorer state
-                if (fInsightExplorer != GetBoolArg("-insightexplorer", false)) {
+                if (fInsightExplorer != GetBoolArg("-insightexplorer", DEFAULT_INSIGHTEXPLORER)) {
                     strLoadError = _("You need to rebuild the database using -reindex to change -insightexplorer");
                     break;
                 }
@@ -1841,6 +1859,11 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         if (clearWitnessCaches || GetBoolArg("-rescan", false))
         {
             pwalletMain->ClearNoteWitnessCache();
+            // zap and rescan clears IDs
+            if (GetArg("-zapwallettxes", false))
+            {
+                pwalletMain->ClearIdentities();
+            }
             pindexRescan = chainActive.Genesis();
         }
         else
@@ -1960,6 +1983,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         if ( !ActivateBestChain(state, Params()))
             strErrors << "Failed to connect best block";
     }
+    InitializePremineSupply();
     std::vector<boost::filesystem::path> vImportFiles;
     if (mapArgs.count("-loadblock"))
     {
@@ -2001,7 +2025,6 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
 
     StartNode(threadGroup, scheduler);
 
-    VERUS_CHEATCATCHER = GetArg("-cheatcatcher", "");
     bool gen = GetBoolArg("-gen", false);
 
 #ifdef ENABLE_MINING

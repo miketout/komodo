@@ -58,6 +58,7 @@ public:
     virtual bool HaveWatchOnly() const =0;
 
     //! Support for identities
+    virtual void ClearIdentities() =0;
     virtual bool HaveIdentity(const CIdentityID &idID) const =0;
     virtual bool AddIdentity(const CIdentityMapKey &mapKey, const CIdentityMapValue &identity) =0;
     virtual bool UpdateIdentity(const CIdentityMapKey &mapKey, const CIdentityMapValue &identity) =0;
@@ -191,6 +192,7 @@ public:
     virtual bool HaveCScript(const CScriptID &hash) const;
     virtual bool GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const;
 
+    virtual void ClearIdentities();
     virtual bool HaveIdentity(const CIdentityID &idID) const;
     virtual bool AddIdentity(const CIdentityMapKey &mapKey, const CIdentityMapValue &identity);
     virtual bool UpdateIdentity(const CIdentityMapKey &mapKey, const CIdentityMapValue &identity);
@@ -200,9 +202,11 @@ public:
     virtual bool GetIdentity(const CIdentityMapKey &keyStart, const CIdentityMapKey &keyEnd, std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &keysAndIdentityUpdates) const;
     virtual bool GetIdentity(const CIdentityMapKey &mapKey, const uint256 &txid, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity);
     virtual bool GetFirstIdentity(const CIdentityID &idID, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity, uint32_t gteHeight=0) const;
-    virtual bool GetIdentities(std::vector<std::pair<CIdentityMapKey, CIdentityMapValue *>> &mine, 
-                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue *>> &imsigner, 
-                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue *>> &notmine);
+    virtual bool GetPriorIdentity(const CIdentityMapKey &mapKey, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity) const;
+    virtual bool GetIdentities(std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &mine, 
+                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &imsigner, 
+                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &notmine);
+    virtual std::set<CKeyID> GetIdentityKeyIDs();
 
     virtual bool AddWatchOnly(const CScript &dest);
     virtual bool RemoveWatchOnly(const CScript &dest);

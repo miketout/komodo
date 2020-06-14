@@ -25,7 +25,7 @@ typedef vector<unsigned char> valtype;
 
 unsigned nMaxDatacarrierBytes = MAX_OP_RETURN_RELAY;
 
-COptCCParams::COptCCParams(std::vector<unsigned char> &vch)
+COptCCParams::COptCCParams(const std::vector<unsigned char> &vch)
 {
     CScript inScr = CScript(vch.begin(), vch.end());
     if (inScr.size() > 1)
@@ -236,6 +236,82 @@ const char* GetTxnOutputType(txnouttype t)
  */
 bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsigned char> >& vSolutionsRet)
 {
+    if (IsCryptoConditionsEnabled()) {
+        // Shortcut for pay-to-crypto-condition
+        CScript ccSubScript = CScript();
+        std::vector<std::vector<unsigned char>> vParams;
+        COptCCParams cp;
+        if (scriptPubKey.IsPayToCryptoCondition(cp))
+        {
+            if (cp.IsValid() && cp.version >= cp.VERSION_V3)
+            {
+                typeRet = TX_CRYPTOCONDITION;
+                static std::set<int> VALID_EVAL_CODES({
+                    EVAL_NONE,
+                    EVAL_STAKEGUARD,
+                    EVAL_CURRENCY_DEFINITION,
+                    EVAL_SERVICEREWARD,
+                    EVAL_EARNEDNOTARIZATION,
+                    EVAL_ACCEPTEDNOTARIZATION,
+                    EVAL_FINALIZE_NOTARIZATION,
+                    EVAL_CURRENCYSTATE,
+                    EVAL_RESERVE_TRANSFER,
+                    EVAL_RESERVE_OUTPUT,
+                    EVAL_RESERVE_EXCHANGE,
+                    EVAL_RESERVE_DEPOSIT,
+                    EVAL_CROSSCHAIN_EXPORT,
+                    EVAL_CROSSCHAIN_IMPORT,
+                    EVAL_IDENTITY_PRIMARY,
+                    EVAL_IDENTITY_REVOKE,
+                    EVAL_IDENTITY_RECOVER,
+                    EVAL_IDENTITY_COMMITMENT,
+                    EVAL_IDENTITY_RESERVATION,
+                    EVAL_FINALIZE_EXPORT
+                });
+                if (VALID_EVAL_CODES.count(cp.evalCode))
+                {
+                    for (auto k : cp.vKeys)
+                    {
+                        if (k.which() == COptCCParams::ADDRTYPE_SH || k.which() == COptCCParams::ADDRTYPE_ID)
+                        {
+                            std::vector<unsigned char> vch(GetDestinationBytes(k));
+                            vch.insert(vch.begin(), (uint8_t)k.which());
+                            vSolutionsRet.push_back(vch);
+                        }
+                        else
+                        {
+                            vSolutionsRet.push_back(GetDestinationBytes(k));
+                        }
+                    }
+                    return true;
+                }
+            }
+            else if (scriptPubKey.IsPayToCryptoCondition(&ccSubScript, vParams))
+            {
+                typeRet = TX_CRYPTOCONDITION;
+
+                if (cp.IsValid())
+                {
+                    if (cp.evalCode != EVAL_STAKEGUARD)
+                    {
+                        LogPrintf("unrecognized smart transaction script type\n");
+                        return false;
+                    }
+                    for (auto k : cp.vKeys)
+                    {
+                        vSolutionsRet.push_back(GetDestinationBytes(k));
+                    }
+                }
+
+                uint160 scrHash; 
+                scrHash = Hash160(ccSubScript);
+                vSolutionsRet.push_back(std::vector<unsigned char>(scrHash.begin(), scrHash.end()));
+                return true;
+            }
+            return false;
+        }
+    }
+
     // Templates
     static multimap<txnouttype, CScript> mTemplates;
     if (mTemplates.empty())
@@ -263,87 +339,6 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
         vector<unsigned char> hashBytes(scriptPubKey.begin()+2, scriptPubKey.begin()+22);
         vSolutionsRet.push_back(hashBytes);
         return true;
-    }
-
-    if (IsCryptoConditionsEnabled()) {
-        // Shortcut for pay-to-crypto-condition
-        CScript ccSubScript = CScript();
-        std::vector<std::vector<unsigned char>> vParams;
-        if (scriptPubKey.IsPayToCryptoCondition(&ccSubScript, vParams))
-        {
-            COptCCParams cp;
-            if (vParams.size())
-            {
-                cp = COptCCParams(vParams[0]);
-            }
-            if (cp.IsValid() && cp.version >= cp.VERSION_V3)
-            {
-                typeRet = TX_CRYPTOCONDITION;
-                static std::set<int> VALID_EVAL_CODES({
-                    EVAL_NONE,
-                    EVAL_STAKEGUARD,
-                    EVAL_PBAASDEFINITION,
-                    EVAL_SERVICEREWARD,
-                    EVAL_EARNEDNOTARIZATION,
-                    EVAL_ACCEPTEDNOTARIZATION,
-                    EVAL_FINALIZENOTARIZATION,
-                    EVAL_CURRENCYSTATE,
-                    EVAL_RESERVE_TRANSFER,
-                    EVAL_RESERVE_OUTPUT,
-                    EVAL_RESERVE_EXCHANGE,
-                    EVAL_RESERVE_DEPOSIT,
-                    EVAL_CROSSCHAIN_EXPORT,
-                    EVAL_CROSSCHAIN_IMPORT,
-                    EVAL_IDENTITY_PRIMARY,
-                    EVAL_IDENTITY_REVOKE,
-                    EVAL_IDENTITY_RECOVER,
-                    EVAL_IDENTITY_COMMITMENT,
-                    EVAL_IDENTITY_RESERVATION
-                });
-                if (VALID_EVAL_CODES.count(cp.evalCode))
-                {
-                    for (auto k : cp.vKeys)
-                    {
-                        if (k.which() == COptCCParams::ADDRTYPE_SH || k.which() == COptCCParams::ADDRTYPE_ID)
-                        {
-                            std::vector<unsigned char> vch(GetDestinationBytes(k));
-                            vch.insert(vch.begin(), (uint8_t)k.which());
-                            vSolutionsRet.push_back(vch);
-                        }
-                        else
-                        {
-                            vSolutionsRet.push_back(GetDestinationBytes(k));
-                        }
-                    }
-                    return true;
-                }
-            }
-            else if (scriptPubKey.MayAcceptCryptoCondition(cp.evalCode))
-            {
-                typeRet = TX_CRYPTOCONDITION;
-
-                if (vParams.size())
-                {
-                    if (cp.IsValid())
-                    {
-                        for (auto k : cp.vKeys)
-                        {
-                            vSolutionsRet.push_back(GetDestinationBytes(k));
-                        }
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                }
-
-                uint160 scrHash; 
-                scrHash = Hash160(ccSubScript);
-                vSolutionsRet.push_back(std::vector<unsigned char>(scrHash.begin(), scrHash.end()));
-                return true;
-            }
-            return false;
-        }
     }
 
     // Scan templates
@@ -653,6 +648,7 @@ bool ExtractDestinations(const CScript& scriptPubKey,
                 // always add the index keys to destinations, but that has nothing to do with whether or not
                 // an ID present in that index represents an address that can sign or spend. ids in this block
                 // are ignored, as all IDs in an output are always indexed in the address and unspent indexes.
+                std::set<CTxDestination> indexSet;
                 for (auto dest : master.vKeys)
                 {
                     // all but ID types
@@ -660,7 +656,11 @@ bool ExtractDestinations(const CScript& scriptPubKey,
                     {
                         // include all non-name addresses from master as destinations as well
                         // name addresses can only be destinations if they are at least "cansign" on one of the subconditions
-                        addressRet.push_back(dest);
+                        if (!indexSet.count(dest))
+                        {
+                            addressRet.push_back(dest);
+                        }
+                        indexSet.insert(dest);
                     }
                 }
 
@@ -677,7 +677,10 @@ bool ExtractDestinations(const CScript& scriptPubKey,
                         for (auto dest : oneP.vKeys)
                         {
                             uint160 destId = GetDestinationID(dest);
-                            addressRet.push_back(dest);
+                            if (!indexSet.count(dest))
+                            {
+                                addressRet.push_back(dest);
+                            }
                             if (dest.which() == COptCCParams::ADDRTYPE_ID)
                             {
                                 // lookup identity, we must have all registered target identity scripts in our keystore, or we try as if they are a keyID, which will be the same
@@ -821,6 +824,11 @@ public:
         return false;
     }
 
+    bool operator()(const CQuantumID &dest) const {
+        script->clear();
+        return false;
+    }
+
     bool operator()(const CPubKey &key) const {
         script->clear();
         *script << ToByteVector(key) << OP_CHECKSIG;
@@ -894,14 +902,6 @@ CScript::ScriptType AddressTypeFromDest(const CTxDestination &dest)
 {
     switch (dest.which()) {
 
-
-        static const uint8_t ADDRTYPE_INVALID = 0;
-        static const uint8_t ADDRTYPE_PK = 1;
-        static const uint8_t ADDRTYPE_PKH = 2;
-        static const uint8_t ADDRTYPE_SH = 3;
-        static const uint8_t ADDRTYPE_ID = 4;
-        static const uint8_t ADDRTYPE_LAST = 3;
-
     case COptCCParams::ADDRTYPE_PK:
     case COptCCParams::ADDRTYPE_PKH:
         return CScript::P2PKH;
@@ -909,6 +909,8 @@ CScript::ScriptType AddressTypeFromDest(const CTxDestination &dest)
         return CScript::P2SH;
     case COptCCParams::ADDRTYPE_ID:
         return CScript::P2ID;
+    case COptCCParams::ADDRTYPE_QUANTUM:
+        return CScript::P2QRK;
     default:
         // This probably won't ever happen, because it would mean that
         // the addressindex contains a type (say, 3) that we (currently)

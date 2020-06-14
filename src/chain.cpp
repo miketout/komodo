@@ -28,7 +28,7 @@ void CChain::SetTip(CBlockIndex *pindex) {
     for (int i = (vChain.size() - modCount); i < vChain.size(); i++)
     {
         // add this block to the Merkle Mountain Range
-        mmr.Add(vChain[i]->GetMMRNode());
+        mmr.Add(vChain[i]->GetBlockMMRNode());
     }
 }
 
@@ -78,7 +78,7 @@ bool CBlockIndex::GetRawVerusPOSHash(uint256 &ret) const
 }
 
 // depending on the height of the block and its type, this returns the POS hash or the POW hash
-uint256 CBlockIndex::GetVerusEntropyHash() const
+uint256 CBlockIndex::GetVerusEntropyHashComponent() const
 {
     uint256 retVal;
     // if we qualify as PoW, use PoW hash, regardless of PoS state
@@ -88,6 +88,79 @@ uint256 CBlockIndex::GetVerusEntropyHash() const
         return retVal;
     }
     return GetBlockHash();
+}
+
+// if pointers are passed for the int output values, two of them will indicate the height that provides one of two
+// entropy values. the other will be -1. if pALTheight is not -1, its block type is the same as the other, which is
+// not -1.
+uint256 CChain::GetVerusEntropyHash(int forHeight, int *pPOSheight, int *pPOWheight, int *pALTheight) const
+{
+    uint256 retVal;
+    int height = forHeight - 100;
+
+    // we want the last value hashed to be a POW hash to make it difficult to predict at source tx creation, then we hash it with the
+    // POS entropy. for old version, we just do what we used to and return the type of hash with the -100 height
+    int _posh, _powh, _alth;
+    int &posh = pPOSheight ? *pPOSheight : _posh;
+    int &powh = pPOWheight ? *pPOWheight : _powh;
+    int &alth = pALTheight ? *pALTheight : _alth;
+    posh = powh = alth = -1;
+
+    if (!(height >= 0 && height < vChain.size()))
+    {
+        LogPrintf("%s: invalid height for entropy hash %d, chain height is %d\n", __func__, height, vChain.size() - 1);
+        return retVal;
+    }
+    if (CConstVerusSolutionVector::GetVersionByHeight(forHeight) < CActivationHeight::ACTIVATE_EXTENDEDSTAKE || height < 11)
+    {
+        if (vChain[height]->IsVerusPOSBlock())
+        {
+            posh = height;
+        }
+        else
+        {
+            powh = height;
+        }
+        return vChain[height]->GetVerusEntropyHashComponent();
+    }
+
+    int i;
+    for (i = 0; i < 10; i++)
+    {
+        if (posh == -1 && vChain[height - i]->IsVerusPOSBlock())
+        {
+            posh = height - i;
+        }
+        else if (powh == -1)
+        {
+            powh = height - i;
+        }
+        if (posh != -1 && powh != -1)
+        {
+            break;
+        }
+    }
+
+    // only one type of block found, set alt
+    if (i == 10)
+    {
+        alth = height - i;
+    }
+
+    CVerusHashV2Writer hashWriter = CVerusHashV2Writer(SER_GETHASH, 0);
+    if (posh != -1)
+    {
+        hashWriter << vChain[posh]->GetVerusEntropyHashComponent();
+    }
+    if (powh != -1)
+    {
+        hashWriter << vChain[powh]->GetVerusEntropyHashComponent();
+    }
+    if (alth != -1)
+    {
+        hashWriter << vChain[alth]->GetVerusEntropyHashComponent();
+    }
+    return hashWriter.GetHash();
 }
 
 CBlockLocator CChain::GetLocator(const CBlockIndex *pindex) const {
@@ -126,6 +199,34 @@ const CBlockIndex *CChain::FindFork(const CBlockIndex *pindex) const {
     while (pindex && !Contains(pindex))
         pindex = pindex->pprev;
     return pindex;
+}
+
+bool CChain::GetBlockProof(ChainMerkleMountainView &view, CMMRProof &retProof, int index) const
+{
+    CBlockIndex *pindex = (index < 0 || index >= (int)vChain.size()) ? NULL : vChain[index];
+    if (pindex)
+    {
+        retProof << pindex->BlockProofBridge();
+        return view.GetProof(retProof, index);
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool CChain::GetMerkleProof(ChainMerkleMountainView &view, CMMRProof &retProof, int index) const
+{
+    CBlockIndex *pindex = (index < 0 || index >= (int)vChain.size()) ? NULL : vChain[index];
+    if (pindex)
+    {
+        retProof << pindex->MMRProofBridge();
+        return view.GetProof(retProof, index);
+    }
+    else
+    {
+        return false;
+    }
 }
 
 CChainPower::CChainPower(CBlockIndex *pblockIndex)

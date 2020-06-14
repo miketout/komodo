@@ -105,6 +105,16 @@ CTxOut MakeCC1of2vout(uint8_t evalcode,CAmount nValue,CPubKey pk1,CPubKey pk2)
     return(vout);
 }
 
+std::vector<unsigned char> GetFulfillmentVector(CScript const& scriptSig)
+{
+    auto pc = scriptSig.begin();
+    opcodetype opcode;
+    std::vector<unsigned char> ffbin;
+    if (scriptSig.GetOp(pc, opcode, ffbin))
+        return ffbin;
+    return std::vector<unsigned char>();
+}
+
 CC* GetCryptoCondition(CScript const& scriptSig)
 {
     auto pc = scriptSig.begin();
@@ -419,7 +429,7 @@ CPubKey GetUnspendable(struct CCcontract_info *cp,uint8_t *unspendablepriv)
     return(pubkey2pk(ParseHex(cp->CChexstr)));
 }
 
-bool ProcessCC(struct CCcontract_info *cp,Eval* eval, std::vector<uint8_t> paramsNull,const CTransaction &ctx, unsigned int nIn, bool fulfilled)
+bool ProcessCC(struct CCcontract_info *cp, Eval* eval, std::vector<uint8_t> paramsNull,const CTransaction &ctx, unsigned int nIn, bool fulfilled)
 {
     CTransaction createTx; uint256 assetid,assetid2,hashBlock; uint8_t funcid; int32_t height,i,n,from_mempool = 0; int64_t amount; std::vector<uint8_t> origpubkey;
     height = KOMODO_CONNECTING;

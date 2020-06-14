@@ -36,12 +36,15 @@
 
 using namespace std;
 
-extern int32_t ASSETCHAINS_ALGO, ASSETCHAINS_EQUIHASH, ASSETCHAINS_LWMAPOS;
+extern uint32_t ASSETCHAINS_ALGO;
+extern int32_t ASSETCHAINS_EQUIHASH, ASSETCHAINS_LWMAPOS;
+extern int32_t VERUS_MIN_STAKEAGE;
 extern uint64_t ASSETCHAINS_STAKED;
 extern int32_t KOMODO_MININGTHREADS;
 extern bool VERUS_MINTBLOCKS;
 extern char ASSETCHAINS_SYMBOL[KOMODO_ASSETCHAIN_MAXLEN];
 arith_uint256 komodo_PoWtarget(int32_t *percPoSp,arith_uint256 target,int32_t height,int32_t goalperc);
+int32_t komodo_blockload(CBlock& block,CBlockIndex *pindex);
 
 /**
  * Return average network hashes per second based on the last 'lookup' blocks,
@@ -396,7 +399,9 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
             "  \"blocks\": nnn,             (numeric) The current block\n"
             "  \"currentblocksize\": nnn,   (numeric) The last block size\n"
             "  \"currentblocktx\": nnn,     (numeric) The last block transaction\n"
+            "  \"averageblockfees\": xxx.xxxxx (numeric) The average block fees, in addition to block reward, over the past 100 blocks\n"
             "  \"difficulty\": xxx.xxxxx    (numeric) The current difficulty\n"
+            "  \"stakingsupply\": xxx.xxxxx (numeric) The current estimated total staking supply\n"
             "  \"errors\": \"...\"          (string) Current errors\n"
             "  \"generate\": true|false     (boolean) If the generation is on or off (see getgenerate or setgenerate calls)\n"
             "  \"genproclimit\": n          (numeric) The processor limit for generation. -1 if no generation. (see getgenerate or setgenerate calls)\n"
@@ -405,6 +410,13 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
             "  \"pooledtx\": n              (numeric) The size of the mem pool\n"
             "  \"testnet\": true|false      (boolean) If using testnet or not\n"
             "  \"chain\": \"xxxx\",         (string) current network name as defined in BIP70 (main, test, regtest)\n"
+#ifdef ENABLE_MINING
+            "  \"generate\": true|false     (boolean) If this instance is mining or staking\n"
+            "  \"staking\": true|false      (boolean) If staking\n"
+            "  \"numthreads\": n            (numeric) Number of CPU threads mining\n"
+            "  \"mergemining\": n           (numeric) Number of blockchains we are merge mining with\n"
+            "  \"mergeminedchains\": []     (optional, list of names) Blockchain names that are being merge mined with this blockchain\n"
+#endif
             "}\n"
             "\nExamples:\n"
             + HelpExampleCli("getmininginfo", "")
@@ -414,11 +426,84 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
 
     LOCK(cs_main);
 
+    auto consensus = Params().GetConsensus();
+    uint32_t height = chainActive.Height();
+    CAmount estimatedStakingSupply = 0;
+    CAmount avgBlockFees = 0;
+    bool avgBlockFeesValid = true;
+
+    if (height > 200)
+    {
+        int first = height - 100;
+
+        arith_uint256 bigTotalFees(0);
+        arith_uint256 totalChainStake(0);
+        arith_uint256 bnStakeTarget;
+        int posCount = 0;
+
+        for (int i = first; i < height; i++)
+        {
+            CBlockIndex &index = *chainActive[i];
+            CBlock block;
+
+            if (avgBlockFeesValid && komodo_blockload(block, &index))
+            {
+                avgBlockFeesValid = false;
+                LogPrintf("%s: failed to estimate average block fees\n", __func__);
+            }
+            else
+            {
+                // subtract block reward from total output of coinbase and add the rest for an average
+                bigTotalFees = bigTotalFees + arith_uint256(block.vtx[0].GetValueOut() - GetBlockSubsidy(index.GetHeight(), consensus));
+            }
+
+            // if POS block, add stake
+            uint256 posWinVal;
+            if (i > 100 && index.IsVerusPOSBlock())
+            {
+                bnStakeTarget.SetCompact(index.GetVerusPOSTarget());
+
+                if (bnStakeTarget == 0)
+                {
+                    totalChainStake = 0;
+                    avgBlockFees = false;
+                    LogPrintf("%s: failed to estimate staking supply\n", __func__);
+                    break;
+                }
+
+                // We need to compute 2**256 / (bnTarget+1), but we can't represent 2**256
+                // as it's too large for a arith_uint256. However, as 2**256 is at least as large
+                // as bnTarget+1, it is equal to ((2**256 - bnTarget - 1) / (bnTarget+1)) + 1,
+                // or ~bnTarget / (nTarget+1) + 1.
+                totalChainStake = totalChainStake + (~bnStakeTarget / (bnStakeTarget + 1)) + 1;
+                posCount++;
+            }
+        }
+
+        avgBlockFees = avgBlockFeesValid ? (bigTotalFees / arith_uint256(height - first)).GetLow64() : 0;
+
+        if (posCount > 5)
+        {
+            totalChainStake = totalChainStake / arith_uint256(height - first);
+        }
+
+        if (totalChainStake > arith_uint256(INT64_MAX))
+        {
+            LogPrintf("%s: overflow estimating staking supply\n", __func__);
+        }
+        else
+        {
+            estimatedStakingSupply = totalChainStake.GetLow64();
+        }
+    }
+
     UniValue obj(UniValue::VOBJ);
-    obj.push_back(Pair("blocks",           (int)chainActive.Height()));
+    obj.push_back(Pair("blocks",           (int)height));
     obj.push_back(Pair("currentblocksize", (uint64_t)nLastBlockSize));
     obj.push_back(Pair("currentblocktx",   (uint64_t)nLastBlockTx));
+    obj.push_back(Pair("averageblockfees", ValueFromAmount(avgBlockFees)));
     obj.push_back(Pair("difficulty",       (double)GetNetworkDifficulty()));
+    obj.push_back(Pair("stakingsupply",    ValueFromAmount(estimatedStakingSupply)));
     obj.push_back(Pair("errors",           GetWarnings("statusbar")));
     obj.push_back(Pair("genproclimit",     (int)GetArg("-genproclimit", -1)));
     if (ASSETCHAINS_ALGO == ASSETCHAINS_EQUIHASH)
@@ -435,14 +520,16 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
     obj.push_back(Pair("testnet",          Params().TestnetToBeDeprecatedFieldRPC()));
     obj.push_back(Pair("chain",            Params().NetworkIDString()));
 #ifdef ENABLE_MINING
-    obj.push_back(Pair("staking",          VERUS_MINTBLOCKS));
     bool mining = GetBoolArg("-gen", false);
+    obj.push_back(Pair("generate",         mining));
+    obj.push_back(Pair("staking",          VERUS_MINTBLOCKS));
+
     auto chains = ConnectedChains.GetMergeMinedChains();
     bool mergeMining = mining && ((!IsVerusActive() && ConnectedChains.IsVerusPBaaSAvailable()) || (IsVerusActive() && chains.size()));
     int numChains = mergeMining ? (IsVerusActive() ? chains.size() + 1 : 1) : 0;
-    obj.push_back(Pair("generate",         mining));
+    obj.push_back(Pair("numthreads",       (int64_t)KOMODO_MININGTHREADS));
     obj.push_back(Pair("mergemining",      numChains));
-    if (chains.size())
+    if (chains.size() || numChains)
     {
         UniValue chainNames(UniValue::VARR);
         for (auto chain : chains)
@@ -451,7 +538,6 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
         }
         obj.push_back(Pair("mergeminedchains", chainNames));
     }
-    obj.push_back(Pair("numthreads",       (int64_t)KOMODO_MININGTHREADS));
 #endif
     return obj;
 }

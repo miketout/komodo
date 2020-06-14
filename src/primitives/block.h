@@ -12,13 +12,15 @@
 #include "uint256.h"
 #include "arith_uint256.h"
 #include "primitives/solutiondata.h"
+#include "mmr.h"
 
 // does not check for height / sapling upgrade, etc. this should not be used to get block proofs
 // on a pre-VerusPoP chain
 arith_uint256 GetCompactPower(const uint256 &nNonce, uint32_t nBits, int32_t version=CPOSNonce::VERUS_V2);
-class CMMRPowerNode;
-class CMerkleBranch;
 class CBlockHeader;
+
+// nodes for the entire chain MMR
+typedef CMMRPowerNode<CBLAKE2bWriter> ChainMMRNode;
 
 /** Nodes collect new transactions into a block, hash them into a hash tree,
  * and scan through nonce values to make the block's hash satisfy proof-of-work
@@ -84,11 +86,11 @@ public:
     }
 
     // returns 0 if not PBaaS, 1 if PBaaS PoW, -1 if PBaaS PoS
-    int32_t IsPBaaS()
+    int32_t IsPBaaS() const
     {
         if (nVersion == VERUS_V2)
         {
-            return CVerusSolutionVector(nSolution).IsPBaaS();
+            return CConstVerusSolutionVector::IsPBaaS(nSolution);
         }
         return 0;
     }
@@ -193,14 +195,13 @@ public:
     int32_t AddPBaaSHeader(const CPBaaSBlockHeader &pbh);
 
     // add the parts of this block header that can be represented by a PBaaS header to the solution
-    int32_t AddPBaaSHeader(uint256 hashPrevMMRRoot, const uint160 &cID)
+    int32_t AddPBaaSHeader(const uint160 &cID)
     {
-
-        CPBaaSBlockHeader pbbh = CPBaaSBlockHeader(cID, CPBaaSPreHeader(*this), hashPrevMMRRoot);
+        CPBaaSBlockHeader pbbh = CPBaaSBlockHeader(cID, CPBaaSPreHeader(*this));
         return AddPBaaSHeader(pbbh);
     }
 
-    bool AddUpdatePBaaSHeader(uint256 mmvRoot);
+    bool AddUpdatePBaaSHeader();
     bool AddUpdatePBaaSHeader(const CPBaaSBlockHeader &pbh);
 
     // clears everything except version, time, and solution, which are shared across all merge mined blocks
@@ -211,6 +212,12 @@ public:
         hashFinalSaplingRoot = uint256();
         nBits = 0;
         nNonce = uint256();
+        CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(nSolution);
+        if (descr.version >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS)
+        {
+            descr.hashPrevMMRRoot = descr.hashBlockMMRRoot = uint256();
+            CConstVerusSolutionVector::SetDescriptor(nSolution, descr);
+        }
     }
 
     // this confirms that the current header's data matches what would be expected from its preheader hash in the
@@ -224,10 +231,15 @@ public:
     }
 
     // return a node from this block header, including hash of merkle root and block hash as well as compact chain power, to put into an MMR
-    CMMRPowerNode GetMMRNode() const;
-    void AddMerkleProofBridge(CMerkleBranch &branch) const;
-    void AddBlockProofBridge(CMerkleBranch &branch) const;
+    ChainMMRNode GetBlockMMRNode() const;
+
+    // getters/setters for extra data in extended solution
     uint256 GetPrevMMRRoot() const;
+    void SetPrevMMRRoot(const uint256 &prevMMRRoot);
+
+    // returns the hashMerkleRoot for blocks before PBaaS
+    uint256 GetBlockMMRRoot() const;
+    void SetBlockMMRRoot(const uint256 &blockMMRRoot);
 
     uint256 GetSHA256DHash() const;
     static void SetSHA256DHash();
@@ -240,7 +252,7 @@ public:
 
     bool GetRawVerusPOSHash(uint256 &ret, int32_t nHeight) const;
     bool GetVerusPOSHash(arith_uint256 &ret, int32_t nHeight, CAmount value) const; // value is amount of stake tx
-    uint256 GetVerusEntropyHash(int32_t nHeight) const;
+    uint256 GetVerusEntropyHashComponent(int32_t nHeight) const;
 
     int64_t GetBlockTime() const
     {
@@ -322,6 +334,22 @@ public:
             return CURRENT_VERSION;
         }
     }
+
+    CMMRNodeBranch MMRProofBridge() const
+    {
+        // we need to add the block hash on the right, no change to index, as bit is zero
+        return CMMRNodeBranch(CMMRNodeBranch::BRANCH_MMRBLAKE_NODE, 2, 0, std::vector<uint256>({GetHash()}));
+    }
+
+    // this does not work on blocks prior to the Verus PBaaS hard fork
+    // to force that to work, the block MMR root will need to be calculated from
+    // the actual block. since blocks being proven are expected to be post-fork
+    // and transaction proofs will work on all blocks, this should be fine
+    CMMRNodeBranch BlockProofBridge()
+    {
+        // we need to add the merkle root on the left
+        return CMMRNodeBranch(CMMRNodeBranch::BRANCH_MMRBLAKE_NODE, 2, 1, std::vector<uint256>({GetBlockMMRRoot()}));
+    }
 };
 
 // this class is used to address the type mismatch that existed between nodes, where block headers
@@ -360,6 +388,12 @@ class CNetworkBlockHeader : public CBlockHeader
         compatVec.clear();    
     }
 };
+
+// for the MMRs for each block
+class CBlock;
+typedef COverlayNodeLayer<CDefaultMMRNode, CBlock> BlockMMRNodeLayer;
+typedef CMerkleMountainRange<CDefaultMMRNode, CChunkedLayer<CDefaultMMRNode, 2>, BlockMMRNodeLayer> BlockMMRange;
+typedef CMerkleMountainView<CDefaultMMRNode, CChunkedLayer<CDefaultMMRNode, 2>, BlockMMRNodeLayer> BlockMMView;
 
 class CBlock : public CBlockHeader
 {
@@ -415,6 +449,13 @@ public:
     // tree (a duplication of transactions in the block leading to an identical
     // merkle root).
     uint256 BuildMerkleTree(bool* mutated = NULL) const;
+    BlockMMRange BuildBlockMMRTree() const;
+    BlockMMRange GetBlockMMRTree() const;
+
+    // get transaction node from the block
+    CDefaultMMRNode GetMMRNode(int index) const;
+
+    CPartialTransactionProof GetPartialTransactionProof(const CTransaction &tx, int txIndex, const std::vector<std::pair<int16_t, int16_t>> &partIndexes) const;
 
     std::vector<uint256> GetMerkleBranch(int nIndex) const;
     static uint256 CheckMerkleBranch(uint256 hash, const std::vector<uint256>& vMerkleBranch, int nIndex);
@@ -492,6 +533,144 @@ struct CBlockLocator
 
     friend bool operator==(const CBlockLocator& a, const CBlockLocator& b) {
         return (a.vHave == b.vHave);
+    }
+};
+
+// class that enables efficient cross-chain proofs of a block
+class CBlockHeaderProof
+{
+public:
+    CMMRProof headerProof;                                  // proof of the block power node
+    CMMRNodeBranch mmrBridge;                            // merkle bridge that also provides a block hash
+    CPBaaSPreHeader preHeader;                              // non-canonical information from block header
+
+    CBlockHeaderProof() {}
+    CBlockHeaderProof(const CBlockHeaderProof &obj) : headerProof(obj.headerProof), mmrBridge(obj.mmrBridge), preHeader(obj.preHeader) {}
+    CBlockHeaderProof(const CMMRProof &powerNodeProof, const CBlockHeader &bh) : 
+        headerProof(powerNodeProof), mmrBridge(bh.MMRProofBridge()), preHeader(bh) {}
+
+    const CBlockHeaderProof &operator=(const CBlockHeaderProof &operand)
+    {
+        CDataStream s(SER_NETWORK, PROTOCOL_VERSION);
+        s << operand;
+        s >> *this;
+        return *this;
+    }
+
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(headerProof);
+        READWRITE(mmrBridge);
+        READWRITE(preHeader);
+    }
+
+    CBlockHeader NonCanonicalHeader(const CBlockHeader &header)
+    {
+        CBlockHeader bh(header);
+        preHeader.SetBlockData(bh);
+        return bh;
+    }
+
+    int32_t BlockNum()
+    {
+        if (headerProof.proofSequence.size() && headerProof.proofSequence[0]->branchType == CMerkleBranchBase::BRANCH_MMRBLAKE_POWERNODE)
+        {
+            return ((CMMRPowerNodeBranch *)(headerProof.proofSequence[0]))->nIndex;
+        }
+        return -1;
+    }
+
+    uint256 BlockHash()
+    {
+        return mmrBridge.branch.size() == 1 ? mmrBridge.branch[0] : uint256();
+    }
+
+    CPBaaSPreHeader BlockPreHeader()
+    {
+        return preHeader;
+    }
+
+    // a block header proof validates the block MMR root, which is used
+    // for proving down to the transaction sub-component. the first value
+    // hashed against is the block hash, which enables proving the block hash as well
+    uint256 ValidateBlockMMRRoot(const uint256 &checkHash, int32_t blockHeight)
+    {
+        uint256 hash = mmrBridge.SafeCheck(checkHash);
+        hash = headerProof.CheckProof(hash);
+        return blockHeight == BlockNum() ? hash : uint256();
+    }
+
+    uint256 ValidateBlockHash(const uint256 &checkHash, int blockHeight)
+    {
+        CMMRNodeBranch blockHashBridge(CMMRNodeBranch::BRANCH_MMRBLAKE_NODE);
+        blockHashBridge.nIndex |= 1;
+        blockHashBridge.branch.push_back(preHeader.hashBlockMMRRoot.IsNull() ? preHeader.hashMerkleRoot : preHeader.hashBlockMMRRoot);
+        uint256 hash = blockHashBridge.SafeCheck(checkHash);
+        hash = headerProof.CheckProof(hash);
+        return blockHeight == BlockNum() ? hash : uint256();
+    }
+};
+
+// class that enables efficient cross-chain proofs of a block
+class CBlockHeaderAndProof
+{
+public:
+    CMMRProof headerProof;                                  // proof of the block power node
+    CBlockHeader blockHeader;                               // full block header
+
+    CBlockHeaderAndProof() {}
+    CBlockHeaderAndProof(const CMMRProof &powerNodeProof, const CBlockHeader &bh) : 
+        headerProof(powerNodeProof), blockHeader(bh) {}
+
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(headerProof);
+        READWRITE(blockHeader);
+    }
+
+    CBlockHeader NonCanonicalHeader()
+    {
+        return blockHeader;
+    }
+
+    int32_t BlockNum()
+    {
+        if (headerProof.proofSequence.size() && headerProof.proofSequence[0]->branchType == CMerkleBranchBase::BRANCH_MMRBLAKE_POWERNODE)
+        {
+            return ((CMMRPowerNodeBranch *)(headerProof.proofSequence[0]))->nIndex;
+        }
+        return -1;
+    }
+
+    uint256 BlockHash()
+    {
+        return blockHeader.GetHash();
+    }
+
+    CPBaaSPreHeader BlockPreHeader()
+    {
+        return CPBaaSPreHeader(blockHeader);
+    }
+
+    // a block header proof validates the block MMR root, which is used
+    // for proving down to the transaction sub-component. the first value
+    // hashed against is the block hash, which enables proving the block hash as well
+    uint256 ValidateBlockMMRRoot(const uint256 &checkHash, int32_t blockHeight)
+    {
+        uint256 hash = blockHeader.MMRProofBridge().SafeCheck(checkHash);
+        hash = headerProof.CheckProof(hash);
+        return blockHeight == BlockNum() ? hash : uint256();
+    }
+
+    uint256 ValidateBlockHash(const uint256 &checkHash, int blockHeight)
+    {
+        uint256 hash = blockHeader.BlockProofBridge().SafeCheck(checkHash);
+        hash = headerProof.CheckProof(hash);
+        return blockHeight == BlockNum() ? hash : uint256();
     }
 };
 

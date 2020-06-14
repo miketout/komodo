@@ -17,18 +17,18 @@
 
 #include <univalue.h>
 
-bool GetChainDefinition(std::string &name, CPBaaSChainDefinition &chainDef);
-bool GetChainDefinition(uint160 chainID, CPBaaSChainDefinition &chainDef, int32_t *pDefHeight = NULL);
+bool GetCurrencyDefinition(std::string &name, CCurrencyDefinition &chainDef);
+bool GetCurrencyDefinition(uint160 chainID, CCurrencyDefinition &chainDef, int32_t *pDefHeight = NULL);
 bool GetNotarizationData(uint160 chainID, uint32_t ecode, CChainNotarizationData &notarizationData, std::vector<std::pair<CTransaction, uint256>> *optionalTxOut = NULL);
 bool GetChainTransfers(std::multimap<uint160, std::pair<CInputDescriptor, CReserveTransfer>> &inputDescriptors, 
                             uint160 chainFilter = uint160(), int start=0, int end=0, uint32_t flags=CReserveTransfer::VALID);
 bool GetUnspentChainTransfers(std::multimap<uint160, std::pair<CInputDescriptor, CReserveTransfer>> &inputDescriptors, uint160 chainFilter = uint160());
 bool GetUnspentChainExports(uint160 chainID, std::multimap<uint160, std::pair<int, CInputDescriptor>> &exportOutputs);
 
-UniValue getchaindefinition(const UniValue& params, bool fHelp);
+UniValue getcurrency(const UniValue& params, bool fHelp);
 UniValue getnotarizationdata(const UniValue& params, bool fHelp);
 UniValue getcrossnotarization(const UniValue& params, bool fHelp);
-UniValue definechain(const UniValue& params, bool fHelp);
+UniValue definecurrency(const UniValue& params, bool fHelp);
 UniValue addmergedblock(const UniValue& params, bool fHelp);
 
 void RegisterPBaaSRPCCommands(CRPCTable &tableRPC);

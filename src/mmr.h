@@ -12,6 +12,8 @@
  * 4. Support for additional information to be captured and propagated along with the
  *    MMR through nodes that may have a more complex combination step, for example, to track aggregate work and stake (power) across all
  *    headers in a chain.
+ * 
+ * 2/23/2020 - added support for alternate hash algorithms
  */
 
 #ifndef MMR_H
@@ -34,73 +36,7 @@
 #define ARRAYLEN(array)     (sizeof(array)/sizeof((array)[0]))
 #endif
 
-class CMerkleBranch
-{
-public:
-    uint64_t nIndex;
-    std::vector<uint256> branch;
-
-    CMerkleBranch() : nIndex(0) {}
-    CMerkleBranch(int i, std::vector<uint256> b) : nIndex(i), branch(b) {}
-
-    CMerkleBranch& operator<<(CMerkleBranch append)
-    {
-        nIndex += append.nIndex << branch.size();
-        branch.insert(branch.end(), append.branch.begin(), append.branch.end());
-        return *this;
-    }
-
-    ADD_SERIALIZE_METHODS;
-    
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(VARINT(nIndex));
-        READWRITE(branch);
-    }
-
-    std::string HashAbbrev(uint256 hash) const
-    {
-        std::string ret;
-        for (int i = 0; i < 5; i++)
-        {
-            ret += " " + std::to_string(*((uint8_t *)&hash + i));
-        }
-        return ret;
-    }
-
-    uint256 SafeCheck(uint256 hash) const
-    {
-        auto index = nIndex;
-        if (index == -1)
-            return uint256();
-
-        // printf("start SafeCheck branch.size(): %lu, index: %lu, hash: %s\n", branch.size(), index, HashAbbrev(hash).c_str());
-        for (auto it(branch.begin()); it != branch.end(); ++it)
-        {
-            if (index & 1) 
-            {
-                if (*it == hash) 
-                {
-                    // non canonical. hash may be equal to node but never on the right.
-                    return uint256();
-                }
-                // printf("hashing: %s + %s\n", HashAbbrev(*it).c_str(), HashAbbrev(hash).c_str());
-                hash = Hash(BEGIN(*it), END(*it), BEGIN(hash), END(hash));
-                // printf("after left: %s\n", HashAbbrev(hash).c_str());
-            }
-            else
-            {
-                // printf("hashing: %s + %s\n", HashAbbrev(hash).c_str(), HashAbbrev(*it).c_str());
-                hash = Hash(BEGIN(hash), END(hash), BEGIN(*it), END(*it));
-                // printf("after right: %s\n", HashAbbrev(hash).c_str());
-            }
-            index >>= 1;
-        }
-        // printf("end SafeCheck\n");
-        return hash;
-    }
-};
-
+template <typename HASHALGOWRITER=CBLAKE2bWriter>
 class CMMRNode
 {
 public:
@@ -108,29 +44,55 @@ public:
     CMMRNode() {}
     CMMRNode(uint256 Hash) : hash(Hash) {}
 
+    template <typename SERIALIZABLE>
+    static uint256 HashObj(const SERIALIZABLE &obj)
+    {
+        HASHALGOWRITER hw(SER_GETHASH, 0);
+        hw << obj;
+        return hw.GetHash();
+    }
+
+    template <typename SERIALIZABLE1, typename SERIALIZABLE2>
+    static uint256 HashObj(const SERIALIZABLE1 &objL, const SERIALIZABLE2 &objR)
+    {
+        HASHALGOWRITER hw(SER_GETHASH, 0);
+        hw << objL;
+        hw << objR;
+        return hw.GetHash();
+    }
+
+    static HASHALGOWRITER GetHashWriter()
+    {
+        return HASHALGOWRITER(SER_GETHASH, 0);
+    }
+
     // add a right to this left and create a parent node
     CMMRNode CreateParentNode(const CMMRNode nRight) const
     {
-        return CMMRNode(Hash(BEGIN(hash), END(hash), BEGIN(nRight.hash), END(nRight.hash)));
+        HASHALGOWRITER hw(SER_GETHASH, 0);
+        hw << hash;
+        hw << nRight.hash;
+        return CMMRNode(hw.GetHash());
     }
 
-    void AddProofHash(CMerkleBranch &branch, uint64_t indexBit, const CMMRNode &opposite) const
+    std::vector<uint256> GetProofHash(const CMMRNode &opposite) const
     {
-        branch.nIndex |= (indexBit & 1) << branch.branch.size();
-        branch.branch.push_back(hash);
+        return {hash};
     }
 
     // leaf nodes that track additional data, such as block power, may need a hash added to the path
     // at the very beginning
-    void AddLeafHash(CMerkleBranch &branch) const { }
+    std::vector<uint256> GetLeafHash() { return {}; }
 
-    uint32_t GetExtraHashCount() const
+    static uint32_t GetExtraHashCount()
     {
         // how many extra proof hashes per layer are added with this node
         return 0;
     }
 };
+typedef CMMRNode<CBLAKE2bWriter> CDefaultMMRNode;
 
+template <typename HASHALGOWRITER=CBLAKE2bWriter>
 class CMMRPowerNode
 {
 public:
@@ -139,6 +101,23 @@ public:
 
     CMMRPowerNode() : hash() {}
     CMMRPowerNode(uint256 Hash, uint256 Power) : hash(Hash), power(Power) {}
+
+    template <typename SERIALIZABLE>
+    static const uint256 &HashObj(const SERIALIZABLE &obj)
+    {
+        HASHALGOWRITER hw(SER_GETHASH, 0);
+        hw << obj;
+        return hw.GetHash();
+    }
+
+    template <typename SERIALIZABLE1, typename SERIALIZABLE2>
+    static uint256 HashObj(const SERIALIZABLE1 &objL, const SERIALIZABLE2 &objR)
+    {
+        HASHALGOWRITER hw(SER_GETHASH, 0);
+        hw << objL;
+        hw << objR;
+        return hw.GetHash();
+    }
 
     arith_uint256 Work() const
     {
@@ -158,29 +137,27 @@ public:
         assert(work << 128 >> 128 == work && stake << 128 >> 128 == stake);
 
         uint256 nodePower = ArithToUint256(stake << 128 | work);
-        uint256 preHash = Hash(BEGIN(hash), END(hash), BEGIN(nRight.hash), END(nRight.hash));
+
+        HASHALGOWRITER hw(SER_GETHASH, 0);
+        hw << hash;
+        hw << nRight.hash;
+        uint256 preHash = hw.GetHash();
+
+        hw = HASHALGOWRITER(SER_GETHASH, 0);
+        hw << preHash;
+        hw << nodePower;
 
         // these separate hashing steps allow the proof to be represented just as a Merkle proof, with steps along the way
         // hashing with nodePower instead of other hashes
-        return CMMRPowerNode(Hash(BEGIN(preHash), END(preHash), BEGIN(nodePower), END(nodePower)), nodePower);
+        return CMMRPowerNode(hw.GetHash(), nodePower);
     }
 
-    void AddProofHash(CMerkleBranch &branch, uint64_t indexBit, const CMMRPowerNode &proving) const
+    std::vector<uint256> GetProofHash(const CMMRPowerNode &proving) const
     {
-        branch.nIndex |= (indexBit & 1) << branch.branch.size();
-        branch.branch.push_back(hash);                                  // add the hash and get the right shift value for the bit
-
-        arith_uint256 work = Work() + proving.Work();
-        arith_uint256 stake = Stake() + proving.Stake();
-        branch.branch.push_back(ArithToUint256(stake << 128 | work));   // hash with combined power
+        return {hash, ArithToUint256((Stake() + proving.Stake()) << 128 | (Work() + proving.Work()))};
     }
 
-    // leaf nodes that track additional data, such as block power, may need a hash added to the path
-    // at the very beginning
-    void AddLeafHash(CMerkleBranch &branch) const
-    {
-        branch.branch.push_back(power);      // power on the right as well
-    }
+    std::vector<uint256> GetLeafHash() { return { power }; }
 
     static uint32_t GetExtraHashCount()
     {
@@ -188,6 +165,7 @@ public:
         return 1;
     }
 };
+typedef CMMRPowerNode<CBLAKE2bWriter> CDefaultMMRPowerNode;
 
 template <typename NODE_TYPE, int CHUNK_SHIFT = 9>
 class CChunkedLayer
@@ -287,12 +265,12 @@ template <typename NODE_TYPE, typename UNDERLYING>
 class COverlayNodeLayer
 {
 private:
-    UNDERLYING *nodeSource;
+    const UNDERLYING *nodeSource;
     uint64_t vSize;
 
 public:
-    COverlayNodeLayer() { }
-    COverlayNodeLayer(UNDERLYING &NodeSource) : nodeSource(&NodeSource), vSize(0) {}
+    COverlayNodeLayer() { assert(false); }
+    COverlayNodeLayer(const UNDERLYING &NodeSource) : nodeSource(&NodeSource), vSize(0) {}
 
     uint64_t size() const
     {
@@ -319,22 +297,366 @@ public:
     void resize(uint64_t newSize) { vSize = newSize; }
 };
 
+class CMerkleBranchBase
+{
+public:
+    enum BRANCH_TYPE
+    {
+        BRANCH_INVALID = 0,
+        BRANCH_BTC = 1,
+        BRANCH_MMRBLAKE_NODE = 2,
+        BRANCH_MMRBLAKE_POWERNODE = 3
+    };
+
+    uint8_t branchType;
+
+    CMerkleBranchBase() : branchType(BRANCH_INVALID) {}
+    CMerkleBranchBase(BRANCH_TYPE type) : branchType(type) {}
+
+    ADD_SERIALIZE_METHODS;
+    
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(branchType);
+    }
+
+    // return the index that would be generated for an mmv of the indicated size at the specified position
+    static uint64_t GetMMRProofIndex(uint64_t pos, uint64_t mmvSize, int extrahashes);
+};
+
+// by default, this is compatible with normal merkle proofs with the existing
+// block merkle roots. different hash algorithms may be selected for performance,
+// security, or other purposes
+template <typename HASHALGOWRITER=CBLAKE2bWriter, typename NODETYPE=CDefaultMMRNode>
+class CMMRBranch : public CMerkleBranchBase
+{
+public:
+    uint32_t nIndex;                // index of the element in this merkle mountain range
+    uint32_t nSize;                 // size of the entire MMR, which is used to determine correct path
+    std::vector<uint256> branch;    // variable size branch, depending on the position in the range
+
+    CMMRBranch() : nIndex(0), nSize(0) {}
+    CMMRBranch(BRANCH_TYPE type) : CMerkleBranchBase(type), nIndex(0), nSize(0) {}
+    CMMRBranch(BRANCH_TYPE type, int size, int i, const std::vector<uint256> &b) : CMerkleBranchBase(type), nSize(size), nIndex(i), branch(b) {}
+
+    CMMRBranch& operator<<(CMMRBranch append)
+    {
+        nIndex += append.nIndex << branch.size();
+        branch.insert(branch.end(), append.branch.begin(), append.branch.end());
+        return *this;
+    }
+
+    ADD_SERIALIZE_METHODS;
+    
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(*(CMerkleBranchBase *)this);
+        READWRITE(VARINT(nIndex));
+        READWRITE(VARINT(nSize));
+        READWRITE(branch);
+    }
+
+    std::string HashAbbrev(uint256 hash) const
+    {
+        std::string ret;
+        for (int i = 0; i < 5; i++)
+        {
+            ret += " " + std::to_string(*((uint8_t *)&hash + i));
+        }
+        return ret;
+    }
+
+    // extraHashes are the count of additional elements, such as work or power, to also incorporate into the hash tree
+    uint256 SafeCheck(uint256 hash) const
+    {
+        int64_t index = GetMMRProofIndex(nIndex, nSize, NODETYPE::GetExtraHashCount());
+
+        if (index == -1)
+        {
+            //printf("returning null 1\n");
+            return uint256();
+        }
+
+        // printf("start SafeCheck branch.size(): %lu, index: %lu, hash: %s\n", branch.size(), index, HashAbbrev(hash).c_str());
+        for (auto it(branch.begin()); it != branch.end(); it++)
+        {
+            HASHALGOWRITER hw(SER_GETHASH, 0);
+            if (index & 1) 
+            {
+                if (*it == hash) 
+                {
+                    // non canonical. hash may be equal to node but never on the right.
+                    //printf("returning null 2\n");
+                    return uint256();
+                }
+                hw << *it;
+                hw << hash;
+                //printf("safeCheck: %s:%s\n", it->GetHex().c_str(), hash.GetHex().c_str());
+            }
+            else
+            {
+                hw << hash;
+                hw << *it;
+                //printf("safeCheck: %s:%s\n", hash.GetHex().c_str(), it->GetHex().c_str());
+            }
+            hash = hw.GetHash();
+            index >>= 1;
+            //printf("safeCheck: %s\n", hash.GetHex().c_str());
+        }
+        return hash;
+    }
+};
+typedef CMMRBranch<CBLAKE2bWriter> CMMRNodeBranch;
+typedef CMMRBranch<CBLAKE2bWriter, CMMRPowerNode<CBLAKE2bWriter>> CMMRPowerNodeBranch;
+
+// by default, this is compatible with normal merkle proofs with the existing
+// block merkle roots. different hash algorithms may be selected for performance,
+// security, or other purposes
+template <typename HASHALGOWRITER=CHashWriter, typename NODETYPE=CMMRNode<HASHALGOWRITER>>
+class CMerkleBranch : public CMerkleBranchBase
+{
+public:
+    uint32_t nIndex;                // index of the element in this merkle tree
+    std::vector<uint256> branch;
+
+    CMerkleBranch() : nIndex(0) {}
+    CMerkleBranch(int i, std::vector<uint256> b) : nIndex(i), branch(b) {}
+
+    CMerkleBranch& operator<<(CMerkleBranch append)
+    {
+        nIndex += append.nIndex << branch.size();
+        branch.insert(branch.end(), append.branch.begin(), append.branch.end());
+        return *this;
+    }
+
+    ADD_SERIALIZE_METHODS;
+    
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(*(CMerkleBranchBase *)this);
+        READWRITE(VARINT(nIndex));
+        READWRITE(branch);
+    }
+
+    std::string HashAbbrev(uint256 hash) const
+    {
+        std::string ret;
+        for (int i = 0; i < 5; i++)
+        {
+            ret += " " + std::to_string(*((uint8_t *)&hash + i));
+        }
+        return ret;
+    }
+
+    // extraHashes are the count of additional elements, such as work or power, to also incorporate into the hash tree
+    uint256 SafeCheck(uint256 hash) const
+    {
+        HASHALGOWRITER hw(SER_GETHASH, 0);
+        int64_t index = nIndex;
+
+        if (index == -1)
+            return uint256();
+
+        // printf("start SafeCheck branch.size(): %lu, index: %lu, hash: %s\n", branch.size(), index, HashAbbrev(hash).c_str());
+        for (auto it(branch.begin()); it != branch.end(); ++it)
+        {
+            if (index & 1) 
+            {
+                if (*it == hash) 
+                {
+                    // non canonical. hash may be equal to node but never on the right.
+                    return uint256();
+                }
+                hw << *it;
+                hw << hash;
+            }
+            else
+            {
+                hw << hash;
+                hw << *it;
+            }
+            hash = hw.GetHash();
+            index >>= 1;
+        }
+        // printf("end SafeCheck\n");
+        return hash;
+    }
+};
+typedef CMerkleBranch<CHashWriter> CBTCMerkleBranch;
+
+class CMMRProof
+{
+public:
+    std::vector<CMerkleBranchBase *> proofSequence;
+
+    CMMRProof() {}
+    CMMRProof(std::vector<CMerkleBranchBase *> ProofSequence) : proofSequence(ProofSequence) {}
+    CMMRProof(const CMMRProof &oldProof)
+    {
+        CDataStream s(SER_NETWORK, PROTOCOL_VERSION);
+        s << oldProof;
+        s >> *this;
+    }
+    const CMMRProof &operator=(const CMMRProof &operand)
+    {
+        CDataStream s(SER_NETWORK, PROTOCOL_VERSION);
+        s << operand;
+        DeleteProofSequence();
+        s >> *this;
+        return *this;
+    }
+
+    ~CMMRProof()
+    {
+        DeleteProofSequence();
+    }
+
+    void DeleteProofSequence();
+
+    ADD_SERIALIZE_METHODS;
+    
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        if (ser_action.ForRead())
+        {
+            int32_t proofSize;
+            READWRITE(proofSize);
+
+            bool error = false;
+            for (int i = 0; i < proofSize && !error; i++)
+            {
+                try
+                {
+                    // our normal way out is an exception at end of stream
+                    // would prefer a better way
+                    uint8_t branchType;
+                    READWRITE(branchType);
+
+                    union {
+                        CBTCMerkleBranch *pBranch;
+                        CMMRNodeBranch *pNodeBranch;
+                        CMMRPowerNodeBranch *pPowerNodeBranch;
+                        CMerkleBranchBase *pobj;
+                    };
+
+                    // non-error exception comes from the first try on each object. after this, it is an error
+                    pobj = nullptr;
+
+                    switch(branchType)
+                    {
+                        case CMerkleBranchBase::BRANCH_BTC:
+                        {
+                            pBranch = new CBTCMerkleBranch();
+                            if (pBranch)
+                            {
+                                READWRITE(*pBranch);
+                            }
+                            break;
+                        }
+                        case CMerkleBranchBase::BRANCH_MMRBLAKE_NODE:
+                        {
+                            pNodeBranch = new CMMRNodeBranch();
+                            if (pNodeBranch)
+                            {
+                                READWRITE(*pNodeBranch);
+                            }
+                            error = false;
+                            break;
+                        }
+                        case CMerkleBranchBase::BRANCH_MMRBLAKE_POWERNODE:
+                        {
+                            pPowerNodeBranch = new CMMRPowerNodeBranch();
+                            if (pPowerNodeBranch)
+                            {
+                                READWRITE(*pPowerNodeBranch);
+                            }
+                            error = false;
+                            break;
+                        }
+                        default:
+                        {
+                            printf("%s: ERROR: default case - proof sequence is likely corrupt, code %d\n", __func__, branchType);
+                            LogPrintf("%s: ERROR: default case - proof sequence is likely corrupt, code %d\n", __func__, branchType);
+                            error = true;
+                        }
+                    }
+
+                    if (pobj)
+                    {
+                        proofSequence.push_back(pobj);
+                    }
+                }
+                catch(const std::exception& e)
+                {
+                    error = true;
+                }
+            }
+
+            if (error)
+            {
+                printf("%s: ERROR: failure - proof sequence is likely corrupt\n", __func__);
+                LogPrintf("%s: ERROR: proof sequence is likely corrupt\n", __func__);
+                DeleteProofSequence();
+            }
+        }
+        else
+        {
+            int32_t proofSize = proofSequence.size();
+            READWRITE(proofSize);
+
+            for (auto pProof : proofSequence)
+            {
+                bool error = false;
+                READWRITE(pProof->branchType);
+
+                switch(pProof->branchType)
+                {
+                    case CMerkleBranchBase::BRANCH_BTC:
+                    {
+                        READWRITE(*(CBTCMerkleBranch *)pProof);
+                        break;
+                    }
+                    case CMerkleBranchBase::BRANCH_MMRBLAKE_NODE:
+                    {
+                        READWRITE(*(CMMRNodeBranch *)pProof);
+                        break;
+                    }
+                    case CMerkleBranchBase::BRANCH_MMRBLAKE_POWERNODE:
+                    {
+                        READWRITE(*(CMMRPowerNodeBranch *)pProof);
+                        break;
+                    }
+                    default:
+                    {
+                        error = true;
+                        printf("ERROR: unknown branch type (%u), likely corrupt\n", pProof->branchType);
+                        break;
+                    }
+                }
+                assert(!error);
+            }
+        }
+    }
+
+    const CMMRProof &operator<<(const CBTCMerkleBranch &append);
+    const CMMRProof &operator<<(const CMMRNodeBranch &append);
+    const CMMRProof &operator<<(const CMMRPowerNodeBranch &append);
+    uint256 CheckProof(uint256 checkHash) const;
+    UniValue ToUniValue() const;
+};
+
 // an in memory MMR is represented by a vector of vectors of hashes, each being a layer of nodes of the binary tree, with the lowest layer
 // being the leaf nodes, and the layers above representing full layers in a mountain or when less than half the length of the layer below,
 // representing a peak.
-template <typename NODE_TYPE, typename LAYER_TYPE=CChunkedLayer<NODE_TYPE>, typename LAYER0_TYPE=LAYER_TYPE>
+template <typename NODE_TYPE=CDefaultMMRNode, typename LAYER_TYPE=CChunkedLayer<NODE_TYPE>, typename LAYER0_TYPE=LAYER_TYPE>
 class CMerkleMountainRange
 {
 public:
     std::vector<LAYER_TYPE> upperNodes;
     LAYER0_TYPE layer0;
 
-    CMerkleMountainRange() { }
-
-    CMerkleMountainRange(LAYER0_TYPE Layer0)
-    {
-        layer0 = Layer0;
-    }
+    CMerkleMountainRange() {}
+    CMerkleMountainRange(const LAYER0_TYPE &Layer0) : layer0(Layer0) {}
 
     // add a leaf node and return the new index. this copies the memory of the leaf node, but does not keep the node itself
     // returns the index # of the new item
@@ -405,7 +727,8 @@ public:
     {
         if (pos >= size())
         {
-            return NULL;
+            std::__throw_length_error("CMerkleMountainRange [] index out of range");
+            return NODE_TYPE();
         }
         return layer0[pos];
     }
@@ -476,7 +799,7 @@ public:
 
 // a view of a merkle mountain range with the size of the range set to a specific position that is less than or equal
 // to the size of the underlying range
-template <typename NODE_TYPE, typename LAYER_TYPE=CChunkedLayer<NODE_TYPE>, typename LAYER0_TYPE=LAYER_TYPE>
+template <typename NODE_TYPE, typename LAYER_TYPE=CChunkedLayer<NODE_TYPE>, typename LAYER0_TYPE=LAYER_TYPE, typename HASHALGOWRITER=CBLAKE2bWriter>
 class CMerkleMountainView
 {
 public:
@@ -485,10 +808,10 @@ public:
     std::vector<NODE_TYPE> peaks;                   // peaks
     std::vector<std::vector<NODE_TYPE>> peakMerkle; // cached layers for the peak merkle if needed
 
-    CMerkleMountainView(const CMerkleMountainRange<NODE_TYPE, LAYER_TYPE, LAYER0_TYPE> &mountainRange, uint64_t viewSize) : mmr(mountainRange), peaks(), peakMerkle()
+    CMerkleMountainView(const CMerkleMountainRange<NODE_TYPE, LAYER_TYPE, LAYER0_TYPE> &mountainRange, uint64_t viewSize=0) : mmr(mountainRange), peaks(), peakMerkle()
     {
         uint64_t maxSize = mountainRange.size();
-        if (viewSize > maxSize)
+        if (viewSize > maxSize || viewSize == 0)
         {
             viewSize = maxSize;
         }
@@ -507,10 +830,10 @@ public:
         }
     }
 
-    CMerkleMountainView(const CMerkleMountainView &mountainView, uint64_t viewSize) : mmr(mountainView.mmr)
+    CMerkleMountainView(const CMerkleMountainView &mountainView, uint64_t viewSize=0) : mmr(mountainView.mmr)
     {
         uint64_t maxSize = mountainView.mmr.size();
-        if (viewSize > maxSize)
+        if (viewSize > maxSize || viewSize == 0)
         {
             viewSize = maxSize;
         }
@@ -525,7 +848,7 @@ public:
     }
 
     // how many elements are stored in this view
-    uint64_t size()
+    uint64_t size() const
     {
         // zero if empty or the size of the zeroeth layer
         return sizes.size() == 0 ? 0 : sizes[0];
@@ -575,7 +898,7 @@ public:
         return size();
     }
 
-    uint64_t maxsize()
+    uint64_t maxsize() const
     {
         return mmr.size() - 1;
     }
@@ -666,24 +989,41 @@ public:
         }
     }
 
-    // return a proof of the element at "index"
-    bool GetProof(CMerkleBranch &retBranch, uint64_t pos)
+    uint8_t GetBranchType(const CDefaultMMRNode &overload)
+    {
+        return CMerkleBranchBase::BRANCH_MMRBLAKE_NODE;
+    }
+
+    uint8_t GetBranchType(const CDefaultMMRPowerNode &overload)
+    {
+        return CMerkleBranchBase::BRANCH_MMRBLAKE_POWERNODE;
+    }
+
+    // return a proof of the element at "pos"
+    bool GetProof(CMMRProof &retProof, uint64_t pos)
     {
         // find a path from the indicated position to the root in the current view
+        CMMRBranch<HASHALGOWRITER, NODE_TYPE> retBranch;
+
         if (pos < size())
         {
             // just make sure the peakMerkle tree is calculated
             GetRoot();
 
-            mmr.layer0[pos].AddLeafHash(retBranch);
+            // if we have leaf information, add it
+            std::vector<uint256> toAdd = mmr.layer0[pos].GetLeafHash();
+            if (toAdd.size())
+            {
+                retBranch.branch.insert(retBranch.branch.end(), toAdd.begin(), toAdd.end());
+            }
 
             uint64_t p = pos;
             for (int l = 0; l < sizes.size(); l++)
             {
                 if (p & 1)
                 {
-                    // if we should hash with the element preceding us to get the node above
-                    mmr.GetNode(l, p - 1).AddProofHash(retBranch, 1, mmr.GetNode(l, p));
+                    std::vector<uint256> proofHashes = mmr.GetNode(l, p - 1).GetProofHash(mmr.GetNode(l, p));
+                    retBranch.branch.insert(retBranch.branch.end(), proofHashes.begin(), proofHashes.end());
                     p >>= 1;
                 }
                 else
@@ -691,11 +1031,22 @@ public:
                     // make sure there is one after us to hash with or we are a peak and should be hashed with the rest of the peaks
                     if (sizes[l] > (p + 1))
                     {
-                        mmr.GetNode(l, p + 1).AddProofHash(retBranch, 0, mmr.GetNode(l, p));
+                        std::vector<uint256> proofHashes = mmr.GetNode(l, p + 1).GetProofHash(mmr.GetNode(l, p));
+                        retBranch.branch.insert(retBranch.branch.end(), proofHashes.begin(), proofHashes.end());
                         p >>= 1;
                     }
                     else
                     {
+                        /* for (auto &oneNode : peaks)
+                        {
+                            printf("peaknode: ");
+                            for (auto oneHash : oneNode.GetProofHash(oneNode))
+                            {
+                                printf("%s:", oneHash.GetHex().c_str());
+                            }
+                            printf("\n");
+                        } */
+
                         // we are at a peak, the alternate peak to us, or the next thing we should be hashed with, if there is one, is next on our path
                         uint256 peakHash = mmr.GetNode(l, p).hash;
 
@@ -725,11 +1076,13 @@ public:
                                     // hash with the one before us
                                     if (layerNum)
                                     {
-                                        peakMerkle[layerIndex][p - 1].AddProofHash(retBranch, 1, peakMerkle[layerIndex][p]);
+                                        std::vector<uint256> proofHashes = peakMerkle[layerIndex][p - 1].GetProofHash(peakMerkle[layerIndex][p]);
+                                        retBranch.branch.insert(retBranch.branch.end(), proofHashes.begin(), proofHashes.end());
                                     }
                                     else
                                     {
-                                        peaks[p - 1].AddProofHash(retBranch, 1, peaks[p]);
+                                        std::vector<uint256> proofHashes = peaks[p - 1].GetProofHash(peaks[p]);
+                                        retBranch.branch.insert(retBranch.branch.end(), proofHashes.begin(), proofHashes.end());
                                     }
                                 }
                                 else
@@ -737,11 +1090,13 @@ public:
                                     // hash with the one in front of us
                                     if (layerNum)
                                     {
-                                        peakMerkle[layerIndex][p + 1].AddProofHash(retBranch, 0, peakMerkle[layerIndex][p]);
+                                        std::vector<uint256> proofHashes = peakMerkle[layerIndex][p + 1].GetProofHash(peakMerkle[layerIndex][p]);
+                                        retBranch.branch.insert(retBranch.branch.end(), proofHashes.begin(), proofHashes.end());
                                     }
                                     else
                                     {
-                                        peaks[p + 1].AddProofHash(retBranch, 0, peaks[p]);
+                                        std::vector<uint256> proofHashes = peaks[p + 1].GetProofHash(peaks[p]);
+                                        retBranch.branch.insert(retBranch.branch.end(), proofHashes.begin(), proofHashes.end());
                                     }
                                 }
                             }
@@ -753,6 +1108,10 @@ public:
                     }
                 }
             }
+            retBranch.branchType = GetBranchType(NODE_TYPE());
+            retBranch.nSize = size();
+            retBranch.nIndex = pos;
+            retProof << retBranch;
             return true;
         }
         return false;
@@ -771,7 +1130,7 @@ public:
         // printf("GetProofBits - pos: %lu, mmvSize: %lu\n", pos, mmvSize);
 
         // find a path from the indicated position to the root in the current view
-        if (pos < mmvSize)
+        if (pos > 0 && pos < mmvSize)
         {
             int extrahashes = NODE_TYPE::GetExtraHashCount();
 
@@ -793,6 +1152,7 @@ public:
                 }
             }
 
+            // figure out the peak merkle
             uint64_t layerNum = 0, layerSize = PeakIndexes.size();
             // with an odd number of elements below, the edge passes through
             for (bool passThrough = (layerSize & 1); layerNum == 0 || layerSize > 1; passThrough = (layerSize & 1), layerNum++)

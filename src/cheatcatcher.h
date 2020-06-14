@@ -77,6 +77,6 @@ class CCheatList
 
 
 extern CCheatList cheatList;
-extern boost::optional<libzcash::SaplingPaymentAddress> cheatCatcher;
+extern boost::optional<libzcash::SaplingPaymentAddress> defaultSaplingDest;
 
 #endif

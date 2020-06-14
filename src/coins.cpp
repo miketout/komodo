@@ -589,7 +589,7 @@ const CScript &CCoinsViewCache::GetSpendFor(const CTxIn& input) const
     return GetSpendFor(coins, input);
 }
 
-CAmount CCoinsViewCache::GetValueIn(int32_t nHeight,int64_t *interestp,const CTransaction& tx,uint32_t tiptime) const
+CAmount CCoinsViewCache::GetValueIn(int32_t nHeight, int64_t *interestp, const CTransaction& tx, uint32_t tiptime) const
 {
     CAmount value,nResult = 0;
     if ( interestp != 0 )
@@ -607,10 +607,10 @@ CAmount CCoinsViewCache::GetValueIn(int32_t nHeight,int64_t *interestp,const CTr
             // if we are a PBaaS chain tx with a coinbase currency state input, all non-shielded inputs are effectively considered burned, since this must be the
             // block's conversion transaction and they are assumed to all be converted
             COptCCParams p;
-            if (!_IsVerusActive() && coins->fCoinBase && coins->vout[tx.vin[i].prevout.n].scriptPubKey.IsPayToCryptoCondition(p) && p.evalCode == EVAL_CURRENCYSTATE)
+            if (!_IsVerusActive() && coins->fCoinBase && coins->vout[tx.vin[i].prevout.n].scriptPubKey.IsPayToCryptoCondition(p) && p.IsValid() && p.evalCode == EVAL_CURRENCYSTATE)
             {
                 CCoinbaseCurrencyState cbcs;
-                if (p.vData.size() && (cbcs = CCoinbaseCurrencyState(p.vData[0])).IsValid() && cbcs.IsReserve())
+                if (p.vData.size() && (cbcs = CCoinbaseCurrencyState(p.vData[0])).IsValid() && cbcs.IsFractional())
                 {
                     nResult = coins->vout[tx.vin[i].prevout.n].nValue;
                     break;
@@ -648,57 +648,30 @@ CAmount CCoinsViewCache::GetValueIn(int32_t nHeight,int64_t *interestp,const CTr
     return nResult;
 }
 
-CAmount CCoinsViewCache::GetReserveValueIn(int32_t nHeight, const CTransaction& tx) const
+CCurrencyValueMap CCoinsViewCache::GetReserveValueIn(int32_t nHeight, const CTransaction& tx) const
 {
-
-    if (_IsVerusActive())
-    {
-        CAmount dummyInterest;
-        return GetValueIn(nHeight, &dummyInterest, tx);
-    }
+    CCurrencyValueMap retMap;
 
     CAmount nResult = 0;
 
-    /* we don't support this coin import, so we should add reserve import support and uncomment
-    if ( tx.IsCoinImport() )
-        return GetCoinImportValue(tx);
-    */
-
     // coinbases have no inputs
     if ( tx.IsCoinBase() != 0 )
-        return 0;
+        return retMap;
 
     for (unsigned int i = 0; i < tx.vin.size(); i++)
     {
         const CCoins* coins = AccessCoins(tx.vin[i].prevout.hash);
         if (coins && coins->IsAvailable(tx.vin[i].prevout.n))
         {
-            COptCCParams p;
-            if (::IsPayToCryptoCondition(coins->vout[tx.vin[i].prevout.n].scriptPubKey, p))
-            {
-                if (p.evalCode == EVAL_RESERVE_OUTPUT)
-                {
-                    nResult += coins->vout[tx.vin[i].prevout.n].scriptPubKey.ReserveOutValue();
-                }
-                else if (!_IsVerusActive() && coins->fCoinBase && p.evalCode == EVAL_CURRENCYSTATE)
-                {
-                    // if spends currency state, all input comes from that
-                    // rest is burned
-                    CCoinbaseCurrencyState cbcs;
-                    if (p.vData.size() && (cbcs = CCoinbaseCurrencyState(p.vData[0])).IsValid() && cbcs.IsReserve())
-                    {
-                        nResult = cbcs.ReserveOut.nValue;
-                        break;
-                    }
-                }
-            }
+            retMap += coins->vout[tx.vin[i].prevout.n].scriptPubKey.ReserveOutValue();
         }
         else
         {
-            return 0;
+            // if coins aren't available, fail all
+            return CCurrencyValueMap();
         }
     }
-    return nResult;
+    return retMap;
 }
 
 //bool CCoinsViewCache::HaveJoinSplitRequirements(const CTransaction& tx) const
@@ -783,16 +756,17 @@ double CCoinsViewCache::GetPriority(const CTransaction &tx, int nHeight, const C
         assert(coins);
         if (!coins->IsAvailable(txin.prevout.n)) continue;
         if (coins->nHeight < nHeight) {
-            dResult += coins->vout[txin.prevout.n].nValue * (nHeight-coins->nHeight);
+            if (currencyState && desc)
+            {
+                dResult += (coins->vout[txin.prevout.n].nValue + currencyState->ReserveToNative(coins->vout[txin.prevout.n].ReserveOutValue())) *
+                           (nHeight-coins->nHeight);
+            }
+            else
+            {
+                dResult += coins->vout[txin.prevout.n].nValue * (nHeight-coins->nHeight);
+            }
         }
     }
-
-    // should at least get an average confs and do better than this
-    if (currencyState && desc)
-    {
-        dResult += desc->reserveOut;
-    }
-
     return tx.ComputePriority(dResult);
 }
 

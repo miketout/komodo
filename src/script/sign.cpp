@@ -747,6 +747,12 @@ static bool SignStep(const BaseSignatureCreator& creator, const CScript& scriptP
             return false;
     }
 
+    COptCCParams p;
+    if (scriptPubKey.IsPayToCryptoCondition(p) && p.IsValid())
+    {
+        return SignStepCC(creator, scriptPubKey, vSolutions, ret, consensusBranchId);
+    }
+
     CKeyID keyID;
 
     switch (whichTypeRet)
@@ -775,9 +781,6 @@ static bool SignStep(const BaseSignatureCreator& creator, const CScript& scriptP
         }
         return false;
     
-    case TX_CRYPTOCONDITION:
-        return SignStepCC(creator, scriptPubKey, vSolutions, ret, consensusBranchId);
-
     case TX_MULTISIG:
         ret.push_back(valtype()); // workaround CHECKMULTISIG bug
         return (SignN(vSolutions, creator, scriptPubKey, ret, consensusBranchId));

@@ -47,6 +47,7 @@ using namespace std;
 using namespace libzcash;
 
 extern char ASSETCHAINS_SYMBOL[KOMODO_ASSETCHAIN_MAXLEN];
+extern int32_t VERUS_MIN_STAKEAGE;
 const std::string ADDR_TYPE_SPROUT = "sprout";
 const std::string ADDR_TYPE_SAPLING = "sapling";
 
@@ -806,7 +807,7 @@ std::string SignMessageHash(const CIdentity &identity, const uint256 &_msgHash, 
     CHashWriterSHA256 ss(SER_GETHASH, PROTOCOL_VERSION);
 
     ss << verusDataSignaturePrefix;
-    ss << ConnectedChains.ThisChain().GetChainID();
+    ss << ConnectedChains.ThisChain().GetID();
     ss << blockHeight;
     ss << identity.GetID();
     ss << _msgHash;
@@ -1146,6 +1147,27 @@ UniValue signmessage(const UniValue& params, bool fHelp)
 
 uint256 HashFile(std::string filepath);
 
+bool printoutAPI = false;
+UniValue printapis(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "printapis trueorfalse\n"
+            "\nPrints the name of all APIs if parameter is true"
+
+            "\nResult:\n"
+            ""
+            "\nExamples:\n"
+            + HelpExampleCli("signfile", "\"RD6GgnrMpPaTSMn8vai6yiGA7mN4QGPV\" \"filepath/filename\"") +
+            "\nVerify the signature\n"
+            + HelpExampleCli("verifyfile", "\"RD6GgnrMpPaTSMn8vai6yiGA7mN4QGPV\" \"signature\" \"filepath/filename\"") +
+            "\nAs json rpc\n"
+            + HelpExampleRpc("signfile", "\"RD6GgnrMpPaTSMn8vai6yiGA7mN4QGPV\", \"filepath/filename\"")
+        );
+    printoutAPI = uni_get_bool(params[0]);
+    return NullUniValue;
+}
+
 UniValue signfile(const UniValue& params, bool fHelp)
 {
     if (!EnsureWalletIsAvailable(fHelp))
@@ -1153,7 +1175,7 @@ UniValue signfile(const UniValue& params, bool fHelp)
 
     if (fHelp || params.size() < 2 || params.size() > 3)
         throw runtime_error(
-            "signfile \"address or identity\" \"filename\" \"curentsig\"\n"
+            "signfile \"address or identity\" \"filepath/filename\" \"curentsig\"\n"
             "\nGenerates a SHA256D hash of the file, returns the hash, and signs the hash with the private key specified"
             + HelpRequiringPassphrase() + "\n"
             "\nArguments:\n"
@@ -1166,8 +1188,6 @@ UniValue signfile(const UniValue& params, bool fHelp)
             "  \"signature\":\"base64sig\"  (string) The aggregate signature of the message encoded in base 64 if all or partial signing successful\n"
             "}\n"
             "\nExamples:\n"
-            "\nUnlock the wallet for 30 seconds\n"
-            + HelpExampleCli("walletpassphrase", "\"mypassphrase\" 30") +
             "\nCreate the signature\n"
             + HelpExampleCli("signfile", "\"RD6GgnrMpPaTSMn8vai6yiGA7mN4QGPV\" \"filepath/filename\"") +
             "\nVerify the signature\n"
@@ -1450,6 +1470,7 @@ UniValue getbalance(const UniValue& params, bool fHelp)
         // (GetBalance() sums up all unspent TxOuts)
         // getbalance and "getbalance * 1 true" should return the same number
         CAmount nBalance = 0;
+        //CAmount altBalance = 0;
         for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
         {
             const CWalletTx& wtx = (*it).second;
@@ -1463,6 +1484,7 @@ UniValue getbalance(const UniValue& params, bool fHelp)
             wtx.GetAmounts(listReceived, listSent, allFee, strSentAccount, filter);
             if (wtx.GetDepthInMainChain() >= nMinDepth)
             {
+                //altBalance += wtx.GetAvailableCredit();
                 BOOST_FOREACH(const COutputEntry& r, listReceived)
                     nBalance += r.amount;
             }
@@ -1470,7 +1492,8 @@ UniValue getbalance(const UniValue& params, bool fHelp)
                 nBalance -= s.amount;
             nBalance -= allFee;
         }
-        return  ValueFromAmount(nBalance);
+        //printf("alternate wallet balance: %s\n", ValueFromAmount(nBalance).write().c_str());
+        return ValueFromAmount(nBalance);
     }
 
     string strAccount = AccountFromValue(params[0]);
@@ -2029,7 +2052,7 @@ void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDe
     bool bIsStake = false;
     bool bIsCoinbase = false;
     bool bIsMint = false;
-    bool bIsReserve = ConnectedChains.ThisChain().IsReserve();
+    bool bIsReserve = ConnectedChains.ThisChain().IsFractional();
     CReserveTransactionDescriptor rtxd;
     CCoinsViewCache view(pcoinsTip);
     uint32_t nHeight = chainActive.Height();
@@ -2061,11 +2084,11 @@ void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDe
             }
         }
         ret.push_back(Pair("nativefees", rtxd.NativeFees()));
-        ret.push_back(Pair("reservefees", rtxd.ReserveFees()));
-        if (rtxd.nativeConversionFees || rtxd.reserveConversionFees)
+        ret.push_back(Pair("reservefees", rtxd.ReserveFees().ToUniValue()));
+        if (rtxd.nativeConversionFees || (rtxd.ReserveConversionFeesMap() > CCurrencyValueMap()))
         {
             ret.push_back(Pair("nativeconversionfees", rtxd.nativeConversionFees));
-            ret.push_back(Pair("reserveconversionfees", rtxd.reserveConversionFees));
+            ret.push_back(Pair("reserveconversionfees", rtxd.ReserveConversionFeesMap().ToUniValue()));
         }
     }
     else
@@ -2090,6 +2113,16 @@ void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDe
             MaybePushAddress(entry, s.destination);
             entry.push_back(Pair("category", bIsStake ? "stake" : "send"));
             entry.push_back(Pair("amount", ValueFromAmount(-s.amount)));
+
+            if (wtx.vout.size() > s.vout)
+            {
+                CCurrencyValueMap tokenAmounts = wtx.vout[s.vout].scriptPubKey.ReserveOutValue();
+                if (tokenAmounts.valueMap.size())
+                {
+                    entry.push_back(Pair("tokenamounts", tokenAmounts.ToUniValue()));
+                }
+            }
+
             entry.push_back(Pair("vout", s.vout));
             entry.push_back(Pair("fee", ValueFromAmount(-nFee)));
             if (fLong)
@@ -2147,9 +2180,9 @@ void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDe
                 }
 
                 entry.push_back(Pair("amount", ValueFromAmount(r.amount)));
-                if (rtxd.IsReserve())
+                if (wtx.vout.size() > r.vout && rtxd.IsReserve())
                 {
-                    entry.push_back(Pair("reserveamount", ValueFromAmount(wtx.vout[r.vout].scriptPubKey.ReserveOutValue())));
+                    entry.push_back(Pair("reserveamount", wtx.vout[r.vout].scriptPubKey.ReserveOutValue().ToUniValue()));
                 }
                 entry.push_back(Pair("vout", r.vout));
                 if (fLong)
@@ -3041,6 +3074,7 @@ UniValue getwalletinfo(const UniValue& params, bool fHelp)
             "  \"unconfirmed_reserve_balance\": xxx, (numeric) total unconfirmed reserve balance of the wallet in " + strprintf("%s",komodo_chainname()) + "\n"
             "  \"immature_balance\": xxxxxx, (numeric) the total immature balance of the wallet in " + strprintf("%s",komodo_chainname()) + "\n"
             "  \"immature_reserve_balance\": xxxxxx, (numeric) total immature reserve balance of the wallet in " + strprintf("%s",komodo_chainname()) + "\n"
+            "  \"eligible_staking_balance\": xxxxxx, (numeric) eligible staking balance in " + strprintf("%s",komodo_chainname()) + "\n"
             "  \"txcount\": xxxxxxx,         (numeric) the total number of transactions in the wallet\n"
             "  \"keypoololdest\": xxxxxx,    (numeric) the timestamp (seconds since GMT epoch) of the oldest pre-generated key in the key pool\n"
             "  \"keypoolsize\": xxxx,        (numeric) how many new keys are pre-generated\n"
@@ -3060,15 +3094,77 @@ UniValue getwalletinfo(const UniValue& params, bool fHelp)
     obj.push_back(Pair("balance",       ValueFromAmount(pwalletMain->GetBalance())));
     obj.push_back(Pair("unconfirmed_balance", ValueFromAmount(pwalletMain->GetUnconfirmedBalance())));
     obj.push_back(Pair("immature_balance", ValueFromAmount(pwalletMain->GetImmatureBalance())));
-    CPBaaSChainDefinition &chainDef = ConnectedChains.ThisChain();
-    if (chainDef.ChainOptions() & chainDef.OPTION_RESERVE)
+
+    std::vector<COutput> vecOutputs;
+    CAmount totalStakingAmount = 0;
+
+    pwalletMain->AvailableCoins(vecOutputs, true, NULL, false, true, false);
+
+    for (int i = 0; i < vecOutputs.size(); i++)
     {
-        obj.push_back(Pair("reserve_balance", ValueFromAmount(pwalletMain->GetReserveBalance())));
-        obj.push_back(Pair("unconfirmed_reserve_balance", ValueFromAmount(pwalletMain->GetUnconfirmedReserveBalance())));
-        obj.push_back(Pair("immature_reserve_balance", ValueFromAmount(pwalletMain->GetImmatureReserveBalance())));
-        uint32_t height = chainActive.LastTip() ? chainActive.LastTip()->GetHeight() : 0;
-        obj.push_back(Pair("price_in_reserve", ValueFromAmount(ConnectedChains.GetCurrencyState(height).PriceInReserve())));
+        auto &txout = vecOutputs[i];
+
+        if (txout.tx &&
+            txout.i < txout.tx->vout.size() &&
+            txout.tx->vout[txout.i].nValue > 0 &&
+            txout.fSpendable &&
+            (txout.nDepth >= VERUS_MIN_STAKEAGE) &&
+            !txout.tx->vout[txout.i].scriptPubKey.IsPayToCryptoCondition())
+        {
+            totalStakingAmount += txout.tx->vout[txout.i].nValue;
+        }
     }
+
+    obj.push_back(Pair("eligible_staking_balance", ValueFromAmount(totalStakingAmount)));
+
+    CCurrencyDefinition &chainDef = ConnectedChains.ThisChain();
+    UniValue reserveBal(UniValue::VOBJ);
+    for (auto &oneBalance : pwalletMain->GetReserveBalance().valueMap)
+    {
+        reserveBal.push_back(make_pair(ConnectedChains.GetCachedCurrency(oneBalance.first).name, ValueFromAmount(oneBalance.second)));
+    }
+    if (reserveBal.size())
+    {
+        obj.push_back(Pair("reserve_balance", reserveBal));
+    }
+
+    UniValue unconfirmedReserveBal(UniValue::VOBJ);
+    for (auto &oneBalance : pwalletMain->GetUnconfirmedReserveBalance().valueMap)
+    {
+        unconfirmedReserveBal.push_back(make_pair(ConnectedChains.GetCachedCurrency(oneBalance.first).name, ValueFromAmount(oneBalance.second)));
+    }
+    if (unconfirmedReserveBal.size())
+    {
+        obj.push_back(Pair("unconfirmed_reserve_balance", unconfirmedReserveBal));
+    }
+
+    UniValue immatureReserveBal(UniValue::VOBJ);
+    for (auto &oneBalance : pwalletMain->GetImmatureReserveBalance().valueMap)
+    {
+        immatureReserveBal.push_back(make_pair(ConnectedChains.GetCachedCurrency(oneBalance.first).name, ValueFromAmount(oneBalance.second)));
+    }
+    if (immatureReserveBal.size())
+    {
+        obj.push_back(Pair("immature_reserve_balance", immatureReserveBal));
+    }
+
+    uint32_t height = chainActive.LastTip() ? chainActive.LastTip()->GetHeight() : 0;
+
+    if ((ConnectedChains.ThisChain().IsFractional() || ConnectedChains.ThisChain().startBlock < height) && 
+        ConnectedChains.ThisChain().currencies.size())
+    {
+        UniValue pricesInReserve(UniValue::VARR);
+        CCoinbaseCurrencyState thisCurState(ConnectedChains.GetCurrencyState(height));
+        std::vector<CAmount> prices(thisCurState.PricesInReserve());
+        for (int i = 0; i < thisCurState.currencies.size(); i++)
+        {
+            UniValue oneCurObj(UniValue::VOBJ);
+            oneCurObj.push_back(make_pair(ConnectedChains.GetCachedCurrency(thisCurState.currencies[i]).name, ValueFromAmount(prices[i])));
+            pricesInReserve.push_back(oneCurObj);
+        }
+        obj.push_back(Pair("prices", pricesInReserve));
+    }
+
     obj.push_back(Pair("txcount",       (int)pwalletMain->mapWallet.size()));
     obj.push_back(Pair("keypoololdest", pwalletMain->GetOldestKeyPoolTime()));
     obj.push_back(Pair("keypoolsize",   (int)pwalletMain->GetKeyPoolSize()));
@@ -3212,10 +3308,10 @@ UniValue listunspent(const UniValue& params, bool fHelp)
         CAmount nValue = out.tx->vout[out.i].nValue;
         entry.push_back(Pair("amount", ValueFromAmount(out.tx->vout[out.i].nValue)));
 
-        CAmount reserveOut;
-        if (ConnectedChains.ThisChain().IsReserve() && (reserveOut = out.tx->vout[out.i].scriptPubKey.ReserveOutValue()))
+        CCurrencyValueMap reserveOut;
+        if (ConnectedChains.ThisChain().IsFractional() && (reserveOut = out.tx->vout[out.i].scriptPubKey.ReserveOutValue()).valueMap.size())
         {
-            entry.push_back(Pair("reserveAmount", ValueFromAmount(reserveOut)));
+            entry.push_back(Pair("reserveAmount", reserveOut.ToUniValue()));
         }
         if ( out.tx->nLockTime != 0 )
         {
@@ -4338,10 +4434,221 @@ UniValue z_gettotalbalance(const UniValue& params, bool fHelp)
     CAmount nTotalBalance = nBalance + nPrivateBalance;
     UniValue result(UniValue::VOBJ);
     result.push_back(Pair("transparent", FormatMoney(nBalance)));
-    result.push_back(Pair("interest", FormatMoney(interest)));
+    //result.push_back(Pair("interest", FormatMoney(interest)));
     result.push_back(Pair("private", FormatMoney(nPrivateBalance)));
     result.push_back(Pair("total", FormatMoney(nTotalBalance)));
     return result;
+}
+
+UniValue z_viewtransaction(const UniValue& params, bool fHelp)
+{
+    if (!EnsureWalletIsAvailable(fHelp))
+        return NullUniValue;
+
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "z_viewtransaction \"txid\"\n"
+            "\nGet detailed shielded information about in-wallet transaction <txid>\n"
+            "\nArguments:\n"
+            "1. \"txid\" (string, required) The transaction id\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"txid\" : \"transactionid\",   (string) The transaction id\n"
+            "  \"spends\" : [\n"
+            "    {\n"
+            "      \"type\" : \"sprout|sapling\",      (string) The type of address\n"
+            "      \"js\" : n,                       (numeric, sprout) the index of the JSDescription within vJoinSplit\n"
+            "      \"jsSpend\" : n,                  (numeric, sprout) the index of the spend within the JSDescription\n"
+            "      \"spend\" : n,                    (numeric, sapling) the index of the spend within vShieldedSpend\n"
+            "      \"txidPrev\" : \"transactionid\",   (string) The id for the transaction this note was created in\n"
+            "      \"jsPrev\" : n,                   (numeric, sprout) the index of the JSDescription within vJoinSplit\n"
+            "      \"jsOutputPrev\" : n,             (numeric, sprout) the index of the output within the JSDescription\n"
+            "      \"outputPrev\" : n,               (numeric, sapling) the index of the output within the vShieldedOutput\n"
+            "      \"address\" : \"zaddress\",       (string) The z address involved in the transaction\n"
+            "      \"value\" : x.xxx                 (numeric) The amount in " + CURRENCY_UNIT + "\n"
+            "      \"valueZat\" : xxxx               (numeric) The amount in zatoshis\n"
+            "    }\n"
+            "    ,...\n"
+            "  ],\n"
+            "  \"outputs\" : [\n"
+            "    {\n"
+            "      \"type\" : \"sprout|sapling\",      (string) The type of address\n"
+            "      \"js\" : n,                       (numeric, sprout) the index of the JSDescription within vJoinSplit\n"
+            "      \"jsOutput\" : n,                 (numeric, sprout) the index of the output within the JSDescription\n"
+            "      \"output\" : n,                   (numeric, sapling) the index of the output within the vShieldedOutput\n"
+            "      \"address\" : \"address\",        (string) The Verus private address involved in the transaction\n"
+            "      \"recovered\" : true|false        (boolean, sapling) True if the output is not for an address in the wallet\n"
+            "      \"value\" : x.xxx                 (numeric) The amount in " + CURRENCY_UNIT + "\n"
+            "      \"valueZat\" : xxxx               (numeric) The amount in zatoshis\n"
+            "      \"memo\" : \"hexmemo\",             (string) Hexademical string representation of the memo field\n"
+            "      \"memoStr\" : \"memo\",             (string) Only returned if memo contains valid UTF-8 text.\n"
+            "    }\n"
+            "    ,...\n"
+            "  ],\n"
+            "}\n"
+
+            "\nExamples:\n"
+            + HelpExampleCli("z_viewtransaction", "\"1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d\"")
+            + HelpExampleRpc("z_viewtransaction", "\"1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d\"")
+        );
+
+    LOCK2(cs_main, pwalletMain->cs_wallet);
+
+    uint256 hash;
+    hash.SetHex(params[0].get_str());
+
+    UniValue entry(UniValue::VOBJ);
+    if (!pwalletMain->mapWallet.count(hash))
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid or non-wallet transaction id");
+    const CWalletTx& wtx = pwalletMain->mapWallet[hash];
+
+    entry.push_back(Pair("txid", hash.GetHex()));
+
+    UniValue spends(UniValue::VARR);
+    UniValue outputs(UniValue::VARR);
+
+    // Sprout spends - retained for old sprout addresses and transactions
+    for (size_t i = 0; i < wtx.vJoinSplit.size(); ++i) {
+        for (size_t j = 0; j < wtx.vJoinSplit[i].nullifiers.size(); ++j) {
+            auto nullifier = wtx.vJoinSplit[i].nullifiers[j];
+
+            // Fetch the note that is being spent, if ours
+            auto res = pwalletMain->mapSproutNullifiersToNotes.find(nullifier);
+            if (res == pwalletMain->mapSproutNullifiersToNotes.end()) {
+                continue;
+            }
+            auto jsop = res->second;
+            auto wtxPrev = pwalletMain->mapWallet.at(jsop.hash);
+
+            auto decrypted = wtxPrev.DecryptSproutNote(jsop);
+            auto notePt = decrypted.first;
+            auto pa = decrypted.second;
+
+            UniValue entry(UniValue::VOBJ);
+            entry.push_back(Pair("type", ADDR_TYPE_SPROUT));
+            entry.push_back(Pair("js", (int)i));
+            entry.push_back(Pair("jsSpend", (int)j));
+            entry.push_back(Pair("txidPrev", jsop.hash.GetHex()));
+            entry.push_back(Pair("jsPrev", (int)jsop.js));
+            entry.push_back(Pair("jsOutputPrev", (int)jsop.n));
+            entry.push_back(Pair("address", EncodePaymentAddress(pa)));
+            entry.push_back(Pair("value", ValueFromAmount(notePt.value())));
+            entry.push_back(Pair("valueZat", notePt.value()));
+            outputs.push_back(entry);
+        }
+    }
+
+    // Sprout outputs
+    for (auto & pair : wtx.mapSproutNoteData) {
+        JSOutPoint jsop = pair.first;
+
+        auto decrypted = wtx.DecryptSproutNote(jsop);
+        auto notePt = decrypted.first;
+        auto pa = decrypted.second;
+        auto memo = notePt.memo();
+
+        UniValue entry(UniValue::VOBJ);
+        entry.push_back(Pair("type", ADDR_TYPE_SPROUT));
+        entry.push_back(Pair("js", (int)jsop.js));
+        entry.push_back(Pair("jsOutput", (int)jsop.n));
+        entry.push_back(Pair("address", EncodePaymentAddress(pa)));
+        entry.push_back(Pair("value", ValueFromAmount(notePt.value())));
+        entry.push_back(Pair("valueZat", notePt.value()));
+        entry.push_back(Pair("memo", HexStr(memo)));
+        if (memo[0] <= 0xf4) {
+            auto end = std::find_if(memo.rbegin(), memo.rend(), [](unsigned char v) { return v != 0; });
+            std::string memoStr(memo.begin(), end.base());
+            //if (utf8::is_valid(memoStr))
+            {
+                entry.push_back(Pair("memoStr", memoStr));
+            }
+        }
+        outputs.push_back(entry);
+    }
+
+    // Sapling spends
+    std::set<uint256> ovks;
+    for (size_t i = 0; i < wtx.vShieldedSpend.size(); ++i) {
+        auto spend = wtx.vShieldedSpend[i];
+
+        // Fetch teh note that is being spent
+        auto res = pwalletMain->mapSaplingNullifiersToNotes.find(spend.nullifier);
+        if (res == pwalletMain->mapSaplingNullifiersToNotes.end()) {
+            continue;
+        }
+        auto op = res->second;
+        auto wtxPrev = pwalletMain->mapWallet.at(op.hash);
+
+        auto decrypted = wtxPrev.DecryptSaplingNote(op).get();
+        auto notePt = decrypted.first;
+        auto pa = decrypted.second;
+
+        // Store the OutgoingViewingKey for recovering outputs
+        libzcash::SaplingFullViewingKey fvk;
+        assert(pwalletMain->GetSaplingFullViewingKey(wtxPrev.mapSaplingNoteData.at(op).ivk, fvk));
+        ovks.insert(fvk.ovk);
+
+        UniValue entry(UniValue::VOBJ);
+        entry.push_back(Pair("type", ADDR_TYPE_SAPLING));
+        entry.push_back(Pair("spend", (int)i));
+        entry.push_back(Pair("txidPrev", op.hash.GetHex()));
+        entry.push_back(Pair("outputPrev", (int)op.n));
+        entry.push_back(Pair("address", EncodePaymentAddress(pa)));
+        entry.push_back(Pair("value", ValueFromAmount(notePt.value())));
+        entry.push_back(Pair("valueZat", notePt.value()));
+        spends.push_back(entry);
+    }
+
+    // Sapling outputs
+    for (uint32_t i = 0; i < wtx.vShieldedOutput.size(); ++i) {
+        auto op = SaplingOutPoint(hash, i);
+
+        SaplingNotePlaintext notePt;
+        SaplingPaymentAddress pa;
+        bool isRecovered;
+
+        auto decrypted = wtx.DecryptSaplingNote(op);
+        if (decrypted) {
+            notePt = decrypted->first;
+            pa = decrypted->second;
+            isRecovered = false;
+        } else {
+            // Try recovering the output
+            auto recovered = wtx.RecoverSaplingNote(op, ovks);
+            if (recovered) {
+                notePt = recovered->first;
+                pa = recovered->second;
+                isRecovered = true;
+            } else {
+                // Unreadable
+                continue;
+            }
+        }
+        auto memo = notePt.memo();
+
+        UniValue entry(UniValue::VOBJ);
+        entry.push_back(Pair("type", ADDR_TYPE_SAPLING));
+        entry.push_back(Pair("output", (int)op.n));
+        entry.push_back(Pair("recovered", isRecovered));
+        entry.push_back(Pair("address", EncodePaymentAddress(pa)));
+        entry.push_back(Pair("value", ValueFromAmount(notePt.value())));
+        entry.push_back(Pair("valueZat", notePt.value()));
+        entry.push_back(Pair("memo", HexStr(memo)));
+        if (memo[0] <= 0xf4) {
+            auto end = std::find_if(memo.rbegin(), memo.rend(), [](unsigned char v) { return v != 0; });
+            std::string memoStr(memo.begin(), end.base());
+            //if (utf8::is_valid(memoStr))
+            {
+                entry.push_back(Pair("memoStr", memoStr));
+            }
+        }
+        outputs.push_back(entry);
+    }
+
+    entry.push_back(Pair("spends", spends));
+    entry.push_back(Pair("outputs", outputs));
+
+    return entry;
 }
 
 UniValue z_getoperationresult(const UniValue& params, bool fHelp)
@@ -5900,9 +6207,18 @@ int32_t komodo_staked(CMutableTransaction &txNew,uint32_t nBits,uint32_t *blockt
     return(siglen);
 }
 
-int32_t verus_staked(CBlock *pBlock, CMutableTransaction &txNew, uint32_t &nBits, arith_uint256 &hashResult, uint8_t *utxosig, CPubKey &pk)
+int32_t verus_staked(CBlock *pBlock, CMutableTransaction &txNew, uint32_t &nBits, arith_uint256 &hashResult, std::vector<unsigned char> &utxosig, CPubKey &pk)
 {
-    return pwalletMain->VerusStakeTransaction(pBlock, txNew, nBits, hashResult, utxosig, pk);
+    try
+    {
+        return pwalletMain->VerusStakeTransaction(pBlock, txNew, nBits, hashResult, utxosig, pk);
+    }
+    catch(const std::exception& e)
+    {
+        printf("ERROR: %s exception in staking\n", e.what());
+        LogPrintf("ERROR: %s exception in staking\n", e.what());
+    }
+    return 0;
 }
 
 int32_t ensure_CCrequirements()
@@ -6128,7 +6444,7 @@ UniValue diceaddress(const UniValue& params, bool fHelp)
 UniValue faucetaddress(const UniValue& params, bool fHelp)
 {
     struct CCcontract_info *cp,C; std::vector<unsigned char> pubkey;
-    int errno;
+    int32_t errno;
     cp = CCinit(&C,EVAL_FAUCET);
     if ( fHelp || params.size() > 1 )
         throw runtime_error("faucetaddress [pubkey]\n");
@@ -7464,6 +7780,7 @@ static const CRPCCommand commands[] =
     { "wallet",             "gettransaction",           &gettransaction,           false },
     { "wallet",             "getunconfirmedbalance",    &getunconfirmedbalance,    false },
     { "wallet",             "getwalletinfo",            &getwalletinfo,            false },
+    { "wallet",             "convertpassphrase",        &convertpassphrase,        true  },
     { "wallet",             "importprivkey",            &importprivkey,            true  },
     { "wallet",             "importwallet",             &importwallet,             true  },
     { "wallet",             "importaddress",            &importaddress,            true  },
@@ -7485,6 +7802,7 @@ static const CRPCCommand commands[] =
     { "wallet",             "settxfee",                 &settxfee,                 true  },
     { "wallet",             "signmessage",              &signmessage,              true  },
     { "wallet",             "signfile",                 &signfile,                 true  },
+    { "hidden",             "printapis",                &printapis,                true  },
     // { "hidden",             "signhash",                 &signhash,                 true  }, // disable due to risk of signing something that doesn't contain the content
     { "wallet",             "walletlock",               &walletlock,               true  },
     { "wallet",             "walletpassphrasechange",   &walletpassphrasechange,   true  },
@@ -7514,6 +7832,7 @@ static const CRPCCommand commands[] =
     { "wallet",             "z_importviewingkey",       &z_importviewingkey,       true  },
     { "wallet",             "z_exportwallet",           &z_exportwallet,           true  },
     { "wallet",             "z_importwallet",           &z_importwallet,           true  },
+    { "wallet",             "z_viewtransaction",        &z_viewtransaction,        true  },
     // TODO: rearrange into another category
     { "disclosure",         "z_getpaymentdisclosure",   &z_getpaymentdisclosure,   true  },
     { "disclosure",         "z_validatepaymentdisclosure", &z_validatepaymentdisclosure, true }

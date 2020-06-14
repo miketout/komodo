@@ -19,14 +19,17 @@
 #include <vector>
 #include "uint256.h"
 #include "pubkey.h"
+#include "pbaas/reserves.h"
 
 #define OPRETTYPE_TIMELOCK 1
 #define OPRETTYPE_STAKEPARAMS 2
 #define OPRETTYPE_STAKECHEAT 3
 #define OPRETTYPE_OBJECT 4
 #define OPRETTYPE_OBJECTARR 5
+#define OPRETTYPE_STAKEPARAMS2 6
 
 class CCurrencyState;
+class CIdentity;
 
 static const unsigned int MAX_SCRIPT_ELEMENT_SIZE_V2 = 1024;
 static const unsigned int MAX_SCRIPT_ELEMENT_SIZE_IDENTITY = 3073;    // fulfillment maximum size + 1, MAKE SURE TO KEEP MAX_BINARY_CC_SIZE IN SYNC WITH THIS-1, BUF_SIZE in crypto conditions, should be >=
@@ -388,13 +391,22 @@ public:
 
 uint160 GetNameID(const std::string &Name, const uint160 &parent);
 
-/** A reference to a CScript: the Hash160 of its serialization (see script.h) */
+/** A reference to an identity: the Hash160 of a specific serialization if its name and parent chain (see script.h) */
 class CIdentityID : public uint160
 {
 public:
     CIdentityID() : uint160() {}
     CIdentityID(const std::string& in, const uint160 &parent=uint160()) : uint160(GetNameID(in, parent)) {}
     CIdentityID(const uint160& in) : uint160(in) {}
+};
+
+/** A reference to a quantum public key: the Hash160 of its serialization (see script.h), which it is indexed by in an output */
+class CQuantumID : public uint160
+{
+public:
+    CQuantumID() : uint160() {}
+    CQuantumID(const std::string& in, const uint160 &parent=uint160()) : uint160(GetNameID(in, parent)) {}
+    CQuantumID(const uint160& in) : uint160(in) {}
 };
 
 /** 
@@ -404,38 +416,131 @@ public:
  *  * CScriptID: TX_SCRIPTHASH destination
  *  A CTxDestination is the internal data type encoded in a bitcoin address
  */
-typedef boost::variant<CNoDestination, CPubKey, CKeyID, CScriptID, CIdentityID> CTxDestination;
+typedef boost::variant<CNoDestination, CPubKey, CKeyID, CScriptID, CIdentityID, CQuantumID> CTxDestination;
+
+CTxDestination TransferDestinationToDestination(const CTransferDestination &trasnferDest);
+CTransferDestination DestinationToTransferDestination(const CTxDestination &dest);
+CTransferDestination IdentityToTransferDestination(const CIdentity &identity);
+CIdentity TransferDestinationToIdentity(const CTransferDestination &dest);
+std::vector<CTxDestination> TransferDestinationsToDestinations(const std::vector<CTransferDestination> &transferDests);
+std::vector<CTransferDestination> DestinationsToTransferDestinations(const std::vector<CTxDestination> &dests);
 
 class COptCCParams
 {
-    public:
-        static const uint8_t VERSION_V1 = 1;
-        static const uint8_t VERSION_V2 = 2;
-        static const uint8_t VERSION_V3 = 3;
+public:
+    static const uint8_t VERSION_V1 = 1;
+    static const uint8_t VERSION_V2 = 2;
+    static const uint8_t VERSION_V3 = 3;
 
-        static const uint8_t ADDRTYPE_INVALID = 0;
-        static const uint8_t ADDRTYPE_PK = 1;
-        static const uint8_t ADDRTYPE_PKH = 2;
-        static const uint8_t ADDRTYPE_SH = 3;
-        static const uint8_t ADDRTYPE_ID = 4;
-        static const uint8_t ADDRTYPE_LAST = 3;
+    static const uint8_t ADDRTYPE_INVALID = 0;
+    static const uint8_t ADDRTYPE_PK = 1;
+    static const uint8_t ADDRTYPE_PKH = 2;
+    static const uint8_t ADDRTYPE_SH = 3;
+    static const uint8_t ADDRTYPE_ID = 4;
+    static const uint8_t ADDRTYPE_QUANTUM = 5;
+    static const uint8_t ADDRTYPE_LAST = 5;
 
-        uint8_t version;
-        uint8_t evalCode;
-        uint8_t m, n; // for m of n sigs required, n pub keys for sigs will follow
-        std::vector<CTxDestination> vKeys;
-        std::vector<std::vector<unsigned char>> vData; // extra parameters
+    uint8_t version;
+    uint8_t evalCode;
+    uint8_t m, n; // for m of n sigs required, n pub keys for sigs will follow
+    std::vector<CTxDestination> vKeys;
+    std::vector<std::vector<unsigned char>> vData; // extra parameters
 
-        COptCCParams() : version(0), evalCode(0), m(0), n(0) {}
+    COptCCParams() : version(0), evalCode(0), m(0), n(0) {}
 
-        COptCCParams(uint8_t ver, uint8_t code, uint8_t _m, uint8_t _n, const std::vector<CTxDestination> &vkeys, const std::vector<std::vector<unsigned char>> &vdata) : 
-            version(ver), evalCode(code), m(_m), n(_n), vKeys(vkeys), vData(vdata) {}
+    COptCCParams(uint8_t ver, uint8_t code, uint8_t _m, uint8_t _n, const std::vector<CTxDestination> &vkeys, const std::vector<std::vector<unsigned char>> &vdata) : 
+        version(ver), evalCode(code), m(_m), n(_n), vKeys(vkeys), vData(vdata) {}
 
-        COptCCParams(std::vector<unsigned char> &vch);
+    COptCCParams(const std::vector<unsigned char> &vch);
 
-        bool IsValid() const { return version == VERSION_V1 || version == VERSION_V2 || version == VERSION_V3; }
+    bool IsValid() const { return version == VERSION_V1 || version == VERSION_V2 || version == VERSION_V3; }
 
-        std::vector<unsigned char> AsVector() const;
+    std::vector<unsigned char> AsVector() const;
+
+    std::vector<CTxDestination> GetDestinations() const
+    {
+        std::vector<CTxDestination> destinations;
+        if (IsValid() && (vKeys.size()))
+        {
+            COptCCParams master;
+            if (version >= VERSION_V3 && vData.size() > 1 && (master = COptCCParams(vData.back())).IsValid())
+            {
+                std::set<CTxDestination> dests;
+                for (auto dest : master.vKeys)
+                {
+                    dests.insert(dest);
+                }
+                for (auto dest : vKeys)
+                {
+                    if (dest.which() == COptCCParams::ADDRTYPE_ID)
+                    {
+                        dests.insert(dest);
+                    }
+                }
+                for (int i = 1; i < (int)(vData.size() - 1); i++)
+                {
+                    COptCCParams oneP(vData[i]);
+                    if (oneP.IsValid())
+                    {
+                        for (auto dest : oneP.vKeys)
+                        {
+                            if (dest.which() == COptCCParams::ADDRTYPE_ID)
+                            {
+                                dests.insert(dest);
+                            }
+                        }
+                    }
+                }
+                for (auto dest : dests)
+                {
+                    destinations.push_back(dest);
+                }
+            }
+            else
+            {
+                destinations.push_back(vKeys[0]);
+            }
+        }
+        return destinations;
+    }
+};
+
+// This is for STAKEGUARD2, which is versioned and enables staking the reserve of a reserve currency
+// chain, where this native currency is a reserve of a native currency that is being notarized into
+// this chain.
+class CStakeInfo
+{
+public:
+    enum
+    {
+        VERSION_INVALID = 0,
+        VERSION_FIRST = 1,
+        VERSION_CURRENT = 1,
+        VERSION_LAST = 1
+    };
+    uint32_t version;
+    uint32_t height;
+    uint32_t sourceHeight;
+    uint256 utxo;
+    uint256 prevHash;
+
+    CStakeInfo() : version(VERSION_INVALID), height(0), sourceHeight(0) {}
+    CStakeInfo(uint32_t Height, uint32_t SourceHeight, const uint256 &UTXO, const uint256 &PrevHash, uint32_t Version=VERSION_CURRENT) : 
+                version(Version), height(0), sourceHeight(0), utxo(UTXO), prevHash(PrevHash) {}
+    CStakeInfo(std::vector<unsigned char> vch);
+
+    std::vector<unsigned char> AsVector() const;
+    
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(VARINT(version));
+        READWRITE(VARINT(height));
+        READWRITE(VARINT(sourceHeight));
+        READWRITE(utxo);
+        READWRITE(prevHash);
+    }
 };
 
 // used when creating crypto condition outputs
@@ -701,9 +806,11 @@ public:
     bool IsPayToCryptoCondition() const;
     CScript &ReplaceCCParams(const COptCCParams &params);
 
-    int64_t ReserveOutValue() const;
-    int64_t ReserveOutValue(COptCCParams &p) const;
-    bool SetReserveOutValue(int64_t newValue);
+    bool IsSpendableOutputType(const COptCCParams &p) const;
+    bool IsSpendableOutputType() const;
+    CCurrencyValueMap ReserveOutValue() const;
+    CCurrencyValueMap ReserveOutValue(COptCCParams &p, bool spendingOnly=false) const;
+    bool SetReserveOutValue(const CCurrencyValueMap &newValue);
 
     bool IsCoinImport() const;
     bool MayAcceptCryptoCondition() const;
@@ -718,6 +825,7 @@ public:
         P2CC = 1,   // CCs are actually not an address type, but as a type of transaction, they are identified historicall as P2PKH. they now can also pay to IDs.
         P2SH = 2,
         P2ID = 3,
+        P2QRK = 4,
     };
 
     ScriptType GetType() const;

@@ -72,6 +72,7 @@ void SetupEnvironment();
 bool SetupNetworking();
 
 bool _IsVerusActive();
+bool _IsVerusMainnetActive();
 
 /** Return true if log accepts specified category */
 bool LogAcceptCategory(const char* category);

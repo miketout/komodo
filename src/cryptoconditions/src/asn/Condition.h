@@ -28,7 +28,8 @@ typedef enum Condition_PR {
 	Condition_PR_rsaSha256,
 	Condition_PR_ed25519Sha256,
 	Condition_PR_secp256k1Sha256,
-	Condition_PR_evalSha256
+	Condition_PR_evalSha256,
+	Condition_PR_falcon512
 } Condition_PR;
 
 /* Condition */

@@ -60,40 +60,86 @@ enum txnouttype
 class CStakeParams
 {
     public:
-        static const uint32_t STAKE_MINPARAMS = 4;
+        static const uint32_t STAKE_MINPARAMS = 2;
         static const uint32_t STAKE_MAXPARAMS = 5;
+
+        enum
+        {
+            VERSION_INVALID = 0,
+            VERSION_FIRST = 1,
+            VERSION_ORIGINAL = 1,
+            VERSION_CURRENT = 2,
+            VERSION_EXTENDED_STAKE = 2,
+            VERSION_LAST = 2
+        };
         
+        uint32_t version;           // used to determine the format as it evolves
         uint32_t srcHeight;
         uint32_t blkHeight;
         uint256 prevHash;
-        CPubKey pk;
+        CPubKey pk;                 // this was from an older version, and is only saved and restored during custom serialization
+        CTxDestination delegate;    // this identifies an alternate valid recipient of the stake reward
     
         CStakeParams() : srcHeight(0), blkHeight(0), prevHash(), pk() {}
 
         CStakeParams(const std::vector<std::vector<unsigned char>> &vData);
 
         CStakeParams(uint32_t _srcHeight, uint32_t _blkHeight, const uint256 &_prevHash, const CPubKey &_pk) :
-            srcHeight(_srcHeight), blkHeight(_blkHeight), prevHash(_prevHash), pk(_pk) {}
+            version(VERSION_ORIGINAL), srcHeight(_srcHeight), blkHeight(_blkHeight), prevHash(_prevHash), pk(_pk) {}
+
+        CStakeParams(uint32_t _srcHeight, uint32_t _blkHeight, const uint256 &_prevHash, const CTxDestination &_delegate) :
+            version(VERSION_CURRENT), srcHeight(_srcHeight), blkHeight(_blkHeight), prevHash(_prevHash), delegate(_delegate) {}
+
+        ADD_SERIALIZE_METHODS;
+
+        template <typename Stream, typename Operation>
+        inline void SerializationOp(Stream& s, Operation ser_action) {
+            READWRITE(version);
+            READWRITE(srcHeight);
+            READWRITE(blkHeight);
+            READWRITE(prevHash);
+            CTransferDestination serDelegate;
+            if (ser_action.ForRead())
+            {
+                READWRITE(serDelegate);
+                delegate = TransferDestinationToDestination(serDelegate);
+            }
+            else
+            {
+                serDelegate = DestinationToTransferDestination(delegate);
+                READWRITE(serDelegate);
+            }
+        }
 
         std::vector<unsigned char> AsVector()
         {
             std::vector<unsigned char> ret;
             CScript scr = CScript();
-            scr << OPRETTYPE_STAKEPARAMS;
-            scr << srcHeight;
-            scr << blkHeight;
-            scr << std::vector<unsigned char>(prevHash.begin(), prevHash.end());
-            
-            if (pk.IsValid())
+            if (version >= VERSION_EXTENDED_STAKE)
             {
-                scr << std::vector<unsigned char>(pk.begin(), pk.end());
+                scr << OPRETTYPE_STAKEPARAMS2;
+                scr << ::AsVector(*this);
+                ret = std::vector<unsigned char>(scr.begin(), scr.end());
             }
-                                    
-            ret = std::vector<unsigned char>(scr.begin(), scr.end());
+            else
+            {
+                scr << OPRETTYPE_STAKEPARAMS;
+                scr << srcHeight;
+                scr << blkHeight;
+                scr << std::vector<unsigned char>(prevHash.begin(), prevHash.end());
+                
+                if (pk.IsValid())
+                {
+                    scr << std::vector<unsigned char>(pk.begin(), pk.end());
+                }                    
+                ret = std::vector<unsigned char>(scr.begin(), scr.end());
+            }
             return ret;
         }
 
-        bool IsValid() const { return srcHeight != 0; }
+        bool IsValid() const { return version >= VERSION_FIRST && version <= VERSION_LAST && srcHeight != 0; }
+
+        uint32_t Version() const { return version; }
 };
 
 /** Check whether a CTxDestination is a CNoDestination. */

@@ -3,6 +3,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
+#include <univalue.h>
 #include "clientversion.h"
 #include "init.h"
 #include "key_io.h"
@@ -23,8 +24,6 @@
 #include <stdint.h>
 
 #include <boost/assign/list_of.hpp>
-
-#include <univalue.h>
 
 #include "zcash/Address.hpp"
 #include "pbaas/pbaas.h"
@@ -58,7 +57,7 @@ extern uint64_t KOMODO_INTERESTSUM,KOMODO_WALLETBALANCE;
 extern int32_t KOMODO_LASTMINED,JUMBLR_PAUSE,KOMODO_LONGESTCHAIN;
 extern char ASSETCHAINS_SYMBOL[KOMODO_ASSETCHAIN_MAXLEN];
 uint32_t komodo_segid32(char *coinaddr);
-int64_t komodo_coinsupply(int64_t *zfundsp,int32_t height);
+bool GetCoinSupply(int64_t &transparentSupply, int64_t *pzsupply, int64_t *pimmaturesupply, uint32_t height);
 int32_t notarizedtxid_height(char *dest,char *txidstr,int32_t *kmdnotarized_heightp);
 
 extern uint16_t ASSETCHAINS_P2PPORT,ASSETCHAINS_RPCPORT;
@@ -193,7 +192,7 @@ UniValue getinfo(const UniValue& params, bool fHelp)
                     acHalving = std::to_string(ASSETCHAINS_HALVING[i]);
                     acDecay = std::to_string(ASSETCHAINS_DECAY[i]);
                     acEndSubsidy = std::to_string(ASSETCHAINS_ENDSUBSIDY[i]);
-                    if (ASSETCHAINS_ERAOPTIONS[i] & CPBaaSChainDefinition::OPTION_RESERVE)
+                    if (ASSETCHAINS_ERAOPTIONS[i] & CCurrencyDefinition::OPTION_FRACTIONAL)
                     {
                         isReserve = true;
                     }
@@ -310,12 +309,19 @@ public:
         }
         return obj;
     }
+
+    UniValue operator()(const CQuantumID &qID) const {
+        UniValue obj(UniValue::VOBJ);
+        CScript subscript;
+        obj.push_back(Pair("isscript", false));
+        obj.push_back(Pair("isquantumkey", true));
+        return obj;
+    }
 };
 #endif
 
 UniValue coinsupply(const UniValue& params, bool fHelp)
 {
-    int32_t height = 0; int32_t currentHeight; int64_t zfunds,supply = 0; UniValue result(UniValue::VOBJ);
     if (fHelp || params.size() > 1)
         throw runtime_error("coinsupply <height>\n"
             "\nReturn coin supply information at a given block height. If no height is given, the current height is used.\n"
@@ -324,8 +330,8 @@ UniValue coinsupply(const UniValue& params, bool fHelp)
             "\nResult:\n"
             "{\n"
             "  \"result\" : \"success\",         (string) If the request was successful.\n"
-            "  \"coin\" : \"KMD\",               (string) The currency symbol of the coin for asset chains, otherwise KMD.\n"
-            "  \"height\" : 420,               (integer) The height of this coin supply data\n"
+            "  \"coin\" : \"VRSC\",              (string) The currency symbol of the native coin of this blockchain.\n"
+            "  \"height\" : 420,                 (integer) The height of this coin supply data\n"
             "  \"supply\" : \"777.0\",           (float) The transparent coin supply\n"
             "  \"zfunds\" : \"0.777\",           (float) The shielded coin supply (in zaddrs)\n"
             "  \"total\" :  \"777.777\",         (float) The total coin supply, i.e. sum of supply + zfunds\n"
@@ -334,18 +340,23 @@ UniValue coinsupply(const UniValue& params, bool fHelp)
             + HelpExampleCli("coinsupply", "420")
             + HelpExampleRpc("coinsupply", "420")
         );
+
+    uint32_t height = 0; 
+    int64_t zfunds = 0, supply = 0, immature = 0; 
+    UniValue result(UniValue::VOBJ);
+
     if ( params.size() == 0 )
         height = chainActive.Height();
-    else height = atoi(params[0].get_str());
-    currentHeight = chainActive.Height();
+    else height = atoi(uni_get_str(params[0]));
 
-    if (height >= 0 && height <= currentHeight) {
-        if ( (supply= komodo_coinsupply(&zfunds,height)) > 0 )
+    if (height > 0 && height <= chainActive.Height()) {
+        if (GetCoinSupply(supply, &zfunds, &immature, height))
         {
             result.push_back(Pair("result", "success"));
             result.push_back(Pair("coin", ASSETCHAINS_SYMBOL[0] == 0 ? "KMD" : ASSETCHAINS_SYMBOL));
             result.push_back(Pair("height", (int)height));
             result.push_back(Pair("supply", ValueFromAmount(supply)));
+            result.push_back(Pair("immature", ValueFromAmount(immature)));
             result.push_back(Pair("zfunds", ValueFromAmount(zfunds)));
             result.push_back(Pair("total", ValueFromAmount(zfunds + supply)));
         } else result.push_back(Pair("error", "couldnt calculate supply"));
@@ -699,8 +710,6 @@ UniValue hashdata(const UniValue& params, bool fHelp)
             "\nResult:\n"
             "  \"hashresult\"         (hexstring) 32 byte has in hex of the data passed in using the hash of the specific blockheight\n"
             "\nExamples:\n"
-            "\nUnlock the wallet for 30 seconds\n"
-            + HelpExampleCli("walletpassphrase", "\"mypassphrase\" 30") +
             "\nCreate the signature\n"
             + HelpExampleCli("signmessage", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"my message\"") +
             "\nVerify the signature\n"
@@ -776,22 +785,22 @@ UniValue verifyhash(const UniValue& params, bool fHelp)
             "verifyhash \"address or identity\" \"signature\" \"hexhash\" \"checklatest\"\n"
             "\nVerify a signed message\n"
             "\nArguments:\n"
-            "1. \"address or identity\" (string, required) The Komodo address to use for the signature.\n"
-            "2. \"signature\"       (string, required) The signature provided by the signer in base 64 encoding (see signmessage).\n"
+            "1. \"t-addr or identity\" (string, required) The transparent address or identity that signed the data.\n"
+            "2. \"signature\"       (string, required) The signature provided by the signer in base 64 encoding (see signmessage/signfile).\n"
             "3. \"hexhash\"         (string, required) Hash of the message or file that was signed.\n"
             "3. \"checklatest\"     (bool, optional)   If true, checks signature validity based on latest identity. defaults to false,\n"
             "                                          which determines validity of signing height stored in signature.\n"
             "\nResult:\n"
             "true|false   (boolean) If the signature is verified or not.\n"
             "\nExamples:\n"
-            "\nUnlock the wallet for 30 seconds\n"
-            + HelpExampleCli("walletpassphrase", "\"mypassphrase\" 30") +
             "\nCreate the signature\n"
+            + HelpExampleCli("signfile", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"filepath/filename\"") +
+            "or\n"
             + HelpExampleCli("signmessage", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"my message\"") +
             "\nVerify the signature\n"
-            + HelpExampleCli("verifymessage", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"signature\" \"my message\"") +
+            + HelpExampleCli("verifyhash", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"signature\" \"hexhash\"") +
             "\nAs json rpc\n"
-            + HelpExampleRpc("verifymessage", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\", \"signature\", \"my message\"")
+            + HelpExampleRpc("verifyhash", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\", \"signature\", \"hexhash\"")
         );
 
     LOCK(cs_main);
@@ -856,7 +865,7 @@ UniValue verifyhash(const UniValue& params, bool fHelp)
         {
             CHashWriterSHA256 ss(SER_GETHASH, PROTOCOL_VERSION);
             ss << verusDataSignaturePrefix;
-            ss << ConnectedChains.ThisChain().GetChainID();
+            ss << ConnectedChains.ThisChain().GetID();
             ss << signature.blockHeight;
             ss << GetDestinationID(destination);
             ss << msgHash;
@@ -938,7 +947,7 @@ UniValue verifymessage(const UniValue& params, bool fHelp)
             "verifymessage \"address or identity\" \"signature\" \"message\" \"checklatest\"\n"
             "\nVerify a signed message\n"
             "\nArguments:\n"
-            "1. \"address or identity\" (string, required) The Komodo address to use for the signature.\n"
+            "1. \"t-addr or identity\" (string, required) The transparent address or identity that signed the message.\n"
             "2. \"signature\"       (string, required) The signature provided by the signer in base 64 encoding (see signmessage).\n"
             "3. \"message\"         (string, required) The message that was signed.\n"
             "3. \"checklatest\"     (bool, optional)   If true, checks signature validity based on latest identity. defaults to false,\n"
@@ -946,8 +955,6 @@ UniValue verifymessage(const UniValue& params, bool fHelp)
             "\nResult:\n"
             "true|false   (boolean) If the signature is verified or not.\n"
             "\nExamples:\n"
-            "\nUnlock the wallet for 30 seconds\n"
-            + HelpExampleCli("walletpassphrase", "\"mypassphrase\" 30") +
             "\nCreate the signature\n"
             + HelpExampleCli("signmessage", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"my message\"") +
             "\nVerify the signature\n"
@@ -1003,7 +1010,7 @@ UniValue verifymessage(const UniValue& params, bool fHelp)
 
             ss.Reset();
             ss << verusDataSignaturePrefix;
-            ss << ConnectedChains.ThisChain().GetChainID();
+            ss << ConnectedChains.ThisChain().GetID();
             ss << signature.blockHeight;
             ss << GetDestinationID(destination);
             ss << msgHash;
@@ -1085,25 +1092,23 @@ UniValue verifyfile(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size() < 3 || params.size() > 4)
         throw runtime_error(
-            "verifymessage \"address or identity\" \"signature\" \"filename\" \"checklatest\"\n"
-            "\nVerify a signed message\n"
+            "verifyfile \"address or identity\" \"signature\" \"filepath/filename\" \"checklatest\"\n"
+            "\nVerify a signed file\n"
             "\nArguments:\n"
-            "1. \"address or identity\" (string, required) The Komodo address to use for the signature.\n"
-            "2. \"signature\"       (string, required) The signature provided by the signer in base 64 encoding (see signmessage).\n"
+            "1. \"t-addr or identity\" (string, required) The transparent address or identity that signed the file.\n"
+            "2. \"signature\"       (string, required) The signature provided by the signer in base 64 encoding (see signfile).\n"
             "3. \"filename\"        (string, required) The file, which must be available locally to the daemon and that was signed.\n"
             "3. \"checklatest\"     (bool, optional)   If true, checks signature validity based on latest identity. defaults to false,\n"
             "                                          which determines validity of signing height stored in signature.\n"
             "\nResult:\n"
             "true|false   (boolean) If the signature is verified or not.\n"
             "\nExamples:\n"
-            "\nUnlock the wallet for 30 seconds\n"
-            + HelpExampleCli("walletpassphrase", "\"mypassphrase\" 30") +
             "\nCreate the signature\n"
-            + HelpExampleCli("signmessage", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"my message\"") +
+            + HelpExampleCli("signfile", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"filepath/filename\"") +
             "\nVerify the signature\n"
-            + HelpExampleCli("verifymessage", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"signature\" \"my message\"") +
+            + HelpExampleCli("verifyfile", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\" \"signature\" \"filepath/filename\"") +
             "\nAs json rpc\n"
-            + HelpExampleRpc("verifymessage", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\", \"signature\", \"my message\"")
+            + HelpExampleRpc("verifyfile", "\"RNKiEBduBru6Siv1cZRVhp4fkZNyPska6z\", \"signature\", \"filepath/filename\"")
         );
 
     LOCK(cs_main);
@@ -1158,7 +1163,7 @@ UniValue verifyfile(const UniValue& params, bool fHelp)
             {
                 CHashWriterSHA256 ss(SER_GETHASH, PROTOCOL_VERSION);
                 ss << verusDataSignaturePrefix;
-                ss << ConnectedChains.ThisChain().GetChainID();
+                ss << ConnectedChains.ThisChain().GetID();
                 ss << signature.blockHeight;
                 ss << GetDestinationID(destination);
                 ss << msgHash;
@@ -1283,6 +1288,8 @@ bool getAddressFromIndex(
         address = EncodeDestination(CScriptID(hash));
     } else if (type == CScript::P2PKH) {
         address = EncodeDestination(CKeyID(hash));
+    } else if (type == CScript::P2PKH) {
+        address = EncodeDestination(CQuantumID(hash));
     } else {
         return false;
     }
@@ -1891,7 +1898,7 @@ static const CRPCCommand commands[] =
     { "util",               "verifymessage",          &verifymessage,          true  },
     { "util",               "verifyfile",             &verifyfile,             true  },
     { "util",               "verifyhash",             &verifyhash,             true  },
-    { "hashdata",           "hashdata",               &hashdata,               true  }, // not visible in help
+    { "hidden",             "hashdata",               &hashdata,               true  }, // not visible in help
 
     // START insightexplorer
     /* Address index */

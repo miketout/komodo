@@ -80,50 +80,76 @@ CPBaaSPreHeader::CPBaaSPreHeader(const CBlockHeader &bh)
     hashFinalSaplingRoot = bh.hashFinalSaplingRoot;
     nNonce = bh.nNonce;
     nBits = bh.nBits;
+    CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(bh.nSolution);
+    if (descr.version >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS)
+    {
+        hashPrevMMRRoot = descr.hashPrevMMRRoot;
+        hashBlockMMRRoot = descr.hashBlockMMRRoot;
+    }
 }
 
-CMMRPowerNode CBlockHeader::GetMMRNode() const
+ChainMMRNode CBlockHeader::GetBlockMMRNode() const
 {
     uint256 blockHash = GetHash();
 
-    uint256 preHash = Hash(BEGIN(hashMerkleRoot), END(hashMerkleRoot), BEGIN(blockHash), END(blockHash));
+    uint256 preHash = ChainMMRNode::HashObj(hashMerkleRoot, blockHash);
     uint256 power = ArithToUint256(GetCompactPower(nNonce, nBits, nVersion));
 
-    return CMMRPowerNode(Hash(BEGIN(preHash), END(preHash), BEGIN(power), END(power)), power);
-}
-
-void CBlockHeader::AddMerkleProofBridge(CMerkleBranch &branch) const
-{
-    // we need to add the block hash on the right
-    branch.branch.push_back(GetHash());
-    branch.nIndex = branch.nIndex << 1;
-}
-
-void CBlockHeader::AddBlockProofBridge(CMerkleBranch &branch) const
-{
-    // we need to add the merkle root on the left
-    branch.branch.push_back(hashMerkleRoot);
-    branch.nIndex = branch.nIndex << 1 + 1;
+    return ChainMMRNode(ChainMMRNode::HashObj(preHash, power), power);
 }
 
 uint256 CBlockHeader::GetPrevMMRRoot() const
 {
-    uint256 ret;
-    CPBaaSBlockHeader pbh;
-    if (GetPBaaSHeader(pbh, ASSETCHAINS_CHAINID) != -1)
+    CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(nSolution);
+    if (descr.version >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS)
     {
-        ret = pbh.hashPrevMMRRoot;
+        return descr.hashPrevMMRRoot;
     }
-    return ret;
+    else
+    {
+        return uint256();
+    }
+}
+
+void CBlockHeader::SetPrevMMRRoot(const uint256 &prevMMRRoot)
+{
+    CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(nSolution);
+    if (descr.version >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS)
+    {
+        descr.hashPrevMMRRoot = prevMMRRoot;
+    }
+    CConstVerusSolutionVector::SetDescriptor(nSolution, descr);
+}
+
+uint256 CBlockHeader::GetBlockMMRRoot() const
+{
+    CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(nSolution);
+    if (descr.version >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS)
+    {
+        return descr.hashBlockMMRRoot;
+    }
+    else
+    {
+        return hashMerkleRoot;
+    }
+}
+
+void CBlockHeader::SetBlockMMRRoot(const uint256 &transactionMMRRoot)
+{
+    CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(nSolution);
+    if (descr.version >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS)
+    {
+        descr.hashBlockMMRRoot = transactionMMRRoot;
+    }
+    CConstVerusSolutionVector::SetDescriptor(nSolution, descr);
 }
 
 // checks that the solution stored data for this header matches what is expected, ensuring that the
-// values in the header match the hash of the pre-header. it does not check the prev MMR root
+// values in the header match the hash of the pre-header.
 bool CBlockHeader::CheckNonCanonicalData() const
 {
-    CPBaaSPreHeader pbph(hashPrevBlock, hashMerkleRoot, hashFinalSaplingRoot, nNonce, nBits);
-    uint256 dummyMMR;
-    CPBaaSBlockHeader pbbh1 = CPBaaSBlockHeader(ASSETCHAINS_CHAINID, pbph, dummyMMR);
+    CPBaaSPreHeader pbph(*this);
+    CPBaaSBlockHeader pbbh1 = CPBaaSBlockHeader(ASSETCHAINS_CHAINID, pbph);
     CPBaaSBlockHeader pbbh2;
     int32_t idx = GetPBaaSHeader(pbbh2, ASSETCHAINS_CHAINID);
     if (idx != -1)
@@ -137,12 +163,11 @@ bool CBlockHeader::CheckNonCanonicalData() const
 }
 
 // checks that the solution stored data for this header matches what is expected, ensuring that the
-// values in the header match the hash of the pre-header. it does not check the prev MMR root
+// values in the header match the hash of the pre-header.
 bool CBlockHeader::CheckNonCanonicalData(uint160 &cID) const
 {
-    CPBaaSPreHeader pbph(hashPrevBlock, hashMerkleRoot, hashFinalSaplingRoot, nNonce, nBits);
-    uint256 dummyMMR;
-    CPBaaSBlockHeader pbbh1 = CPBaaSBlockHeader(cID, pbph, dummyMMR);
+    CPBaaSPreHeader pbph(*this);
+    CPBaaSBlockHeader pbbh1 = CPBaaSBlockHeader(cID, pbph);
     CPBaaSBlockHeader pbbh2;
     int32_t idx = GetPBaaSHeader(pbbh2, cID);
     if (idx != -1)
@@ -206,7 +231,7 @@ int32_t CBlockHeader::AddPBaaSHeader(const CPBaaSBlockHeader &pbh)
 bool CBlockHeader::AddUpdatePBaaSHeader(const CPBaaSBlockHeader &pbh)
 {
     CPBaaSBlockHeader pbbh;
-    if (CConstVerusSolutionVector::Version(nSolution) >= CActivationHeight::ACTIVATE_PBAAS)
+    if (nVersion == VERUS_V2 && CConstVerusSolutionVector::Version(nSolution) >= CActivationHeight::ACTIVATE_PBAAS)
     {
         if (int32_t idx = GetPBaaSHeader(pbbh, pbh.chainID) != -1)
         {
@@ -222,12 +247,11 @@ bool CBlockHeader::AddUpdatePBaaSHeader(const CPBaaSBlockHeader &pbh)
 
 // add or update the current PBaaS header for this block from the current block header & this prevMMR.
 // This is required to make a valid PoS or PoW block.
-bool CBlockHeader::AddUpdatePBaaSHeader(uint256 prevMMRRoot)
+bool CBlockHeader::AddUpdatePBaaSHeader()
 {
-    if (CConstVerusSolutionVector::Version(nSolution) >= CActivationHeight::ACTIVATE_PBAAS)
+    if (nVersion == VERUS_V2 && CConstVerusSolutionVector::Version(nSolution) >= CActivationHeight::ACTIVATE_PBAAS)
     {
-        CPBaaSPreHeader pbph(hashPrevBlock, hashMerkleRoot, hashFinalSaplingRoot, nNonce, nBits);
-        CPBaaSBlockHeader pbh(ASSETCHAINS_CHAINID, pbph, prevMMRRoot);
+        CPBaaSBlockHeader pbh(ASSETCHAINS_CHAINID, CPBaaSPreHeader(*this));
 
         CPBaaSBlockHeader pbbh;
         int32_t idx = GetPBaaSHeader(pbbh, ASSETCHAINS_CHAINID);
@@ -363,7 +387,7 @@ bool CBlockHeader::GetVerusPOSHash(arith_uint256 &ret, int32_t nHeight, CAmount 
 }
 
 // depending on the height of the block and its type, this returns the POS hash or the POW hash
-uint256 CBlockHeader::GetVerusEntropyHash(int32_t height) const
+uint256 CBlockHeader::GetVerusEntropyHashComponent(int32_t height) const
 {
     uint256 retVal;
     // if we qualify as PoW, use PoW hash, regardless of PoS state
@@ -447,6 +471,78 @@ uint256 CBlock::BuildMerkleTree(bool* fMutated) const
     for (int i=0; i<vtx.size(); i++) leaves.push_back(vtx[i].GetHash());
     return ::BuildMerkleTree(fMutated, leaves, vMerkleTree);
 }
+
+
+CDefaultMMRNode CBlock::GetMMRNode(int index) const
+{
+    if (index >= vtx.size())
+    {
+        return CDefaultMMRNode(uint256());
+    }
+    return vtx[index].GetDefaultMMRNode();
+}
+
+
+// This creates the MMR tree for the block, which replaces the merkle tree used today
+// while enabling a proof of the transaction hash as well as parts of the transaction
+// such as inputs, outputs, shielded spends and outputs, transaction header info, etc.
+BlockMMRange CBlock::BuildBlockMMRTree() const
+{
+    // build a tree of transactions, each having both the transaction ID and root of the transaction
+    // map's MMR. that enables any part of a transaction in the blockchain to be proven outside the
+    // blockchain, without having to also hash an original transaction in order to know what part of it contains.
+    // for now, we will duplicate the merkle tree and enable proof of an element within a transaction using the MMR.
+    // at some point, we should replace the txid with a fully hashed transaction tree and deprecate standard
+    // txids altogether.
+    BlockMMRange mmRange(BlockMMRNodeLayer(*this));
+    for (auto &tx : vtx)
+    {
+        mmRange.Add(tx.GetDefaultMMRNode());
+    }
+    return mmRange;
+}
+
+BlockMMRange CBlock::GetBlockMMRTree() const
+{
+    // no caching yet, the anticipation of which is why this is separate from build
+    return BuildBlockMMRTree();
+}
+
+CPartialTransactionProof CBlock::GetPartialTransactionProof(const CTransaction &tx, int txIndex, const std::vector<std::pair<int16_t, int16_t>> &partIndexes) const
+{
+    std::vector<CTransactionComponentProof> components;
+
+    if (IsPBaaS() != 0)
+    {
+        // make a partial transaction proof for the export opret only
+        BlockMMRange blockMMR(BuildBlockMMRTree());
+        BlockMMView blockMMV(blockMMR);
+        CMMRProof txProof;
+
+        if (!blockMMV.GetProof(txProof, txIndex))
+        {
+            LogPrintf("%s: Cannot make transaction proof in block\n", __func__);
+            printf("%s: Cannot make transaction proof in block\n", __func__);
+            return CPartialTransactionProof();
+        }
+
+        CTransactionMap txMap(tx);
+        TransactionMMView txMMV(txMap.transactionMMR);
+        
+        for (auto &partIdx : partIndexes)
+        {
+            components.push_back(CTransactionComponentProof(txMMV, txMap, tx, partIdx.first, partIdx.second));
+        }
+
+        return CPartialTransactionProof(txProof, components);
+    }
+    else
+    {
+        // make a proof of the whole transaction
+        CMMRProof exportProof = CMMRProof() << CMerkleBranch<CHashWriter>(txIndex, GetMerkleBranch(txIndex));
+        return CPartialTransactionProof(exportProof, tx);
+    }
+}            
 
 
 std::vector<uint256> GetMerkleBranch(int nIndex, int nLeaves, const std::vector<uint256> &vMerkleTree)

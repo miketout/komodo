@@ -70,6 +70,15 @@ static asn_TYPE_member_t asn_MBR_Fulfillment_1[] = {
 		0,
 		"evalSha256"
 		},
+	{ ATF_NOFLAGS, 0, offsetof(struct Fulfillment, choice.falcon512Sha256),
+		(ASN_TAG_CLASS_CONTEXT | (31 << 2)),  /* Monkins:whats the bit shift for falcon??*/
+		-1,	/* IMPLICIT tag at current level */
+		&asn_DEF_EvalFulfillment,
+		0,	/* Defer constraints checking to the member type */
+		0,	/* PER is not compiled, use -gen-PER */
+		0,
+		"falcon512Sha256"
+		},
 };
 static const asn_TYPE_tag2member_t asn_MAP_Fulfillment_tag2el_1[] = {
     { (ASN_TAG_CLASS_CONTEXT | (0 << 2)), 0, 0, 0 }, /* preimageSha256 */
@@ -78,7 +87,8 @@ static const asn_TYPE_tag2member_t asn_MAP_Fulfillment_tag2el_1[] = {
     { (ASN_TAG_CLASS_CONTEXT | (3 << 2)), 3, 0, 0 }, /* rsaSha256 */
     { (ASN_TAG_CLASS_CONTEXT | (4 << 2)), 4, 0, 0 }, /* ed25519Sha256 */
     { (ASN_TAG_CLASS_CONTEXT | (5 << 2)), 5, 0, 0 }, /* secp256k1Sha256 */
-    { (ASN_TAG_CLASS_CONTEXT | (15 << 2)), 6, 0, 0 } /* evalSha256 */
+    { (ASN_TAG_CLASS_CONTEXT | (15 << 2)), 6, 0, 0 }, /* evalSha256 */
+	{ (ASN_TAG_CLASS_CONTEXT | (31 << 2)), 6, 0, 0 } /* falcon512Sha256 */
 };
 static asn_CHOICE_specifics_t asn_SPC_Fulfillment_specs_1 = {
 	sizeof(struct Fulfillment),

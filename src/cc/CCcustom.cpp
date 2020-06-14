@@ -13,6 +13,7 @@
  *                                                                            *
  ******************************************************************************/
 
+#include <univalue.h>
 #include "key_io.h"
 #include "CCinclude.h"
 #include "CCassets.h"
@@ -150,15 +151,25 @@ std::string IdentityReservationAddr = "RDbzJU8rEv4CkMABNUnKQoKDTfnikSm9fM";
 std::string IdentityReservationPubKey = "03974e76f57409197870d4e5539380b2f8468465c2bd374e3610edf1282cd1a304";
 std::string IdentityReservationWIF = "UqCXEj8oonBt6p9iDXbsAshCeFX7RsDpL6R62GUhTVRiSKDCQkYi";
 
+// FinalizeExport
+std::string FinalizeExportAddr = "REL7oLNeaeoQB1XauiHfcvjKMZC52Uj5xF";
+std::string FinalizeExportPubKey = "0391fa230bd2509cbcc165c636c79ff540a8e3615993b16b8e366770bc4261bf10";
+std::string FinalizeExportWIF = "UrRwoqyLMNddbASS7XV6rm3Q1JCBmMV9V5oPr92KEFmH5U8Evkf6";
+
+// quantum resistant public key output to keep one copy of a public key and refer to it via its hash on the chain
+std::string QuantumKeyOutAddr = "RQ55dLQ7uGnLx8scXfkaFV6QS6qVBGyxAG";
+std::string QuantumKeyOutPubKey = "0231dbadc511bcafdb557faf0b49bea1e2a4ccc0259aeae16c618e1cc4d38f2f4d";
+std::string QuantumKeyOutWIF = "Ux4w6K5ptuQG4SUEQd1bRV8X1LwzcLrVirApbXvThKYfm6uXEafJ";
+
 // atomic swap condition
-std::string AtomicSwapConditionAddr = "RQ55dLQ7uGnLx8scXfkaFV6QS6qVBGyxAG";
-std::string AtomicSwapConditionPubKey = "0231dbadc511bcafdb557faf0b49bea1e2a4ccc0259aeae16c618e1cc4d38f2f4d";
-std::string AtomicSwapConditionWIF = "Ux4w6K5ptuQG4SUEQd1bRV8X1LwzcLrVirApbXvThKYfm6uXEafJ";
+std::string AtomicSwapConditionAddr = "";
+std::string AtomicSwapConditionPubKey = "";
+std::string AtomicSwapConditionWIF = "";
 
 // condition to put time limits on a transaction output
-std::string TimeLimitsAddr = "REL7oLNeaeoQB1XauiHfcvjKMZC52Uj5xF";
-std::string TimeLimitsPubKey = "0391fa230bd2509cbcc165c636c79ff540a8e3615993b16b8e366770bc4261bf10";
-std::string TimeLimitsWIF = "UrRwoqyLMNddbASS7XV6rm3Q1JCBmMV9V5oPr92KEFmH5U8Evkf6";
+std::string TimeLimitsAddr = "";
+std::string TimeLimitsPubKey = "";
+std::string TimeLimitsWIF = "";
 
 // Assets, aka Tokens
 #define FUNCNAME IsAssetsInput
@@ -339,10 +350,10 @@ struct CCcontract_info *CCinit(struct CCcontract_info *cp, uint8_t evalcode)
             memcpy(cp->CCpriv,DecodeSecret(StakeGuardWIF).begin(),32);
             cp->validate = StakeGuardValidate;
             cp->ismyvin = IsStakeGuardInput;  // TODO: these input functions are not useful for new CCs
-            cp->contextualprecheck = DefaultCCContextualPreCheck;
+            cp->contextualprecheck = PrecheckStakeGuardOutput;
             break;
 
-        case EVAL_PBAASDEFINITION:
+        case EVAL_CURRENCY_DEFINITION:
             strcpy(cp->unspendableCCaddr,PBaaSDefinitionAddr.c_str());
             strcpy(cp->normaladdr,PBaaSDefinitionAddr.c_str());
             strcpy(cp->CChexstr,PBaaSDefinitionPubKey.c_str());
@@ -372,7 +383,7 @@ struct CCcontract_info *CCinit(struct CCcontract_info *cp, uint8_t evalcode)
             cp->contextualprecheck = DefaultCCContextualPreCheck;
             break;
 
-        case EVAL_FINALIZENOTARIZATION:
+        case EVAL_FINALIZE_NOTARIZATION:
             strcpy(cp->unspendableCCaddr,FinalizeNotarizationAddr.c_str());
             strcpy(cp->normaladdr,FinalizeNotarizationAddr.c_str());
             strcpy(cp->CChexstr,FinalizeNotarizationPubKey.c_str());
@@ -509,7 +520,27 @@ struct CCcontract_info *CCinit(struct CCcontract_info *cp, uint8_t evalcode)
             memcpy(cp->CCpriv, DecodeSecret(IdentityReservationWIF).begin(),32);
             cp->validate = ValidateIdentityReservation;
             cp->ismyvin = IsIdentityInput;
-            cp->contextualprecheck = &PrecheckIdentityReservation;
+            cp->contextualprecheck = PrecheckIdentityReservation;
+            break;
+
+        case EVAL_FINALIZE_EXPORT:
+            strcpy(cp->unspendableCCaddr,FinalizeExportAddr.c_str());
+            strcpy(cp->normaladdr,FinalizeExportAddr.c_str());
+            strcpy(cp->CChexstr,FinalizeExportPubKey.c_str());
+            memcpy(cp->CCpriv,DecodeSecret(FinalizeExportWIF).begin(),32);
+            cp->validate = ValidateFinalizeExport;
+            cp->ismyvin = IsFinalizeExportInput;  // TODO: these input functions are not useful for new CCs
+            cp->contextualprecheck = FinalizeExportContextualPreCheck;
+            break;
+
+        case EVAL_QUANTUM_KEY:
+            strcpy(cp->unspendableCCaddr, QuantumKeyOutAddr.c_str());
+            strcpy(cp->normaladdr, QuantumKeyOutAddr.c_str());
+            strcpy(cp->CChexstr, QuantumKeyOutPubKey.c_str());     // ironically, this does not need to be a quantum secure public key, since privkey is public
+            memcpy(cp->CCpriv, DecodeSecret(QuantumKeyOutWIF).begin(),32);
+            cp->validate = ValidateQuantumKeyOut;
+            cp->ismyvin = IsQuantumKeyOutInput;
+            cp->contextualprecheck = PrecheckQuantumKeyOut;
             break;
 
         // these are currently not used and should be triple checked if reenabled

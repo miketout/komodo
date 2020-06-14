@@ -10,7 +10,7 @@ libcryptoconditions_la_SOURCES = include/cryptoconditions.h
 libcryptoconditions_la_LIBADD = $(CRYPTOCONDITIONS_CORE) $(LIBSECP256K1)
 
 AM_CFLAGS = -I$(top_srcdir)/src/asn -I$(top_srcdir)/include -I$(top_srcdir)/src/include \
-			-Wall -Wno-pointer-sign -Wno-discarded-qualifiers
+			-I$(top_srcdir)/src/include/falcon -Wall -Wno-pointer-sign -Wno-discarded-qualifiers
 
 LIBSECP256K1=src/include/secp256k1/libsecp256k1.la
 
@@ -45,6 +45,17 @@ libcryptoconditions_core_la_SOURCES = \
 	src/include/ed25519/src/ge.c \
 	src/include/ed25519/src/add_scalar.c \
 	src/include/ed25519/src/key_exchange.c \
+	src/include/falcon/codec.c \
+	src/include/falcon/common.c \
+	src/include/falcon/falcon.c \
+	src/include/falcon/fft.c \
+	src/include/falcon/fpr.c \
+	src/include/falcon/keygen.c \
+	src/include/falcon/rng.c \
+	src/include/falcon/shake.c \
+	src/include/falcon/sign.c \
+	src/include/falcon/speed.c \
+	src/include/falcon/vrfy.c \
 	src/asn/Condition.c	\
 	src/asn/SimpleSha256Condition.c	\
 	src/asn/CompoundSha256Condition.c	\
@@ -62,6 +73,8 @@ libcryptoconditions_core_la_SOURCES = \
 	src/asn/EvalFulfillment.c \
 	src/asn/Secp256k1FingerprintContents.c \
 	src/asn/Secp256k1Fulfillment.c \
+	src/asn/Falcon512FingerprintContents.c \
+	src/asn/Falcon512Fulfillment.c \
 	src/asn/INTEGER.c \
 	src/asn/NativeEnumerated.c \
 	src/asn/NativeInteger.c \

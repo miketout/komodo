@@ -63,7 +63,8 @@ enum {
     // power of 2 + Haraka sized key will not be used
     VERUSKEYSIZE=1024 * 8 + (40 * 16),
     SOLUTION_VERUSHHASH_V2 = 1,          // this must be in sync with CScript::SOLUTION_VERUSV2
-    SOLUTION_VERUSHHASH_V2_1 = 3         // this must be in sync with CScript::ACTIVATE_VERUSHASH2_1
+    SOLUTION_VERUSHHASH_V2_1 = 3,        // this must be in sync with CScript::ACTIVATE_VERUSHASH2_1
+    SOLUTION_VERUSHHASH_V2_2 = 4         // this must be in sync with CScript::ACTIVATE_VERUSHASH2_2
 };
 
 struct verusclhash_descr
@@ -102,8 +103,10 @@ extern int __cpuverusoptimized;
 
 __m128i __verusclmulwithoutreduction64alignedrepeat(__m128i *randomsource, const __m128i buf[4], uint64_t keyMask, __m128i **pMoveScratch);
 __m128i __verusclmulwithoutreduction64alignedrepeat_sv2_1(__m128i *randomsource, const __m128i buf[4], uint64_t keyMask, __m128i **pMoveScratch);
+__m128i __verusclmulwithoutreduction64alignedrepeat_sv2_2(__m128i *randomsource, const __m128i buf[4], uint64_t keyMask, __m128i **pMoveScratch);
 __m128i __verusclmulwithoutreduction64alignedrepeat_port(__m128i *randomsource, const __m128i buf[4], uint64_t keyMask, __m128i **pMoveScratch);
 __m128i __verusclmulwithoutreduction64alignedrepeat_sv2_1_port(__m128i *randomsource, const __m128i buf[4], uint64_t keyMask, __m128i **pMoveScratch);
+__m128i __verusclmulwithoutreduction64alignedrepeat_sv2_2_port(__m128i *randomsource, const __m128i buf[4], uint64_t keyMask, __m128i **pMoveScratch);
 
 inline bool IsCPUVerusOptimized()
 {
@@ -140,7 +143,9 @@ inline void ForceCPUVerusOptimized(bool trueorfalse)
 uint64_t verusclhash(void * random, const unsigned char buf[64], uint64_t keyMask, __m128i **pMoveScratch);
 uint64_t verusclhash_port(void * random, const unsigned char buf[64], uint64_t keyMask, __m128i **pMoveScratch);
 uint64_t verusclhash_sv2_1(void * random, const unsigned char buf[64], uint64_t keyMask, __m128i **pMoveScratch);
+uint64_t verusclhash_sv2_2(void * random, const unsigned char buf[64], uint64_t keyMask, __m128i **pMoveScratch);
 uint64_t verusclhash_sv2_1_port(void * random, const unsigned char buf[64], uint64_t keyMask, __m128i **pMoveScratch);
+uint64_t verusclhash_sv2_2_port(void * random, const unsigned char buf[64], uint64_t keyMask, __m128i **pMoveScratch);
 void *alloc_aligned_buffer(uint64_t bufSize);
 
 #ifdef __cplusplus
@@ -201,8 +206,16 @@ struct verusclhasher {
         {
             if (solutionVersion >= SOLUTION_VERUSHHASH_V2_1)
             {
-                verusclhashfunction = &verusclhash_sv2_1;
-                verusinternalclhashfunction = &__verusclmulwithoutreduction64alignedrepeat_sv2_1;
+                if (solutionVersion >= SOLUTION_VERUSHHASH_V2_2)
+                {
+                    verusclhashfunction = &verusclhash_sv2_2;
+                    verusinternalclhashfunction = &__verusclmulwithoutreduction64alignedrepeat_sv2_2;
+                }
+                else
+                {
+                    verusclhashfunction = &verusclhash_sv2_1;
+                    verusinternalclhashfunction = &__verusclmulwithoutreduction64alignedrepeat_sv2_1;
+                }
             }
             else
             {
@@ -214,8 +227,16 @@ struct verusclhasher {
         {
             if (solutionVersion >= SOLUTION_VERUSHHASH_V2_1)
             {
-                verusclhashfunction = &verusclhash_sv2_1_port;
-                verusinternalclhashfunction = &__verusclmulwithoutreduction64alignedrepeat_sv2_1_port;
+                if (solutionVersion >= SOLUTION_VERUSHHASH_V2_2)
+                {
+                    verusclhashfunction = &verusclhash_sv2_2_port;
+                    verusinternalclhashfunction = &__verusclmulwithoutreduction64alignedrepeat_sv2_2_port;
+                }
+                else
+                {
+                    verusclhashfunction = &verusclhash_sv2_1_port;
+                    verusinternalclhashfunction = &__verusclmulwithoutreduction64alignedrepeat_sv2_1_port;
+                }
             }
             else
             {

@@ -104,6 +104,11 @@ bool CBasicKeyStore::GetCScript(const CScriptID &hash, CScript& redeemScriptOut)
     return false;
 }
 
+void CBasicKeyStore::ClearIdentities()
+{
+    mapIdentities.clear();
+}
+
 bool CBasicKeyStore::HaveIdentity(const CIdentityID &idID) const
 {
     return mapIdentities.count(CIdentityMapKey(idID).MapKey()) != 0;
@@ -259,27 +264,107 @@ bool CBasicKeyStore::GetFirstIdentity(const CIdentityID &idID, std::pair<CIdenti
     return true;
 }
 
-bool CBasicKeyStore::GetIdentities(std::vector<std::pair<CIdentityMapKey, CIdentityMapValue *>> &mine, 
-                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue *>> &imsigner, 
-                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue *>> &notmine)
+// return the first identity not less than a specific key
+bool CBasicKeyStore::GetPriorIdentity(const CIdentityMapKey &idMapKey, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity) const
 {
+    auto it = mapIdentities.lower_bound(idMapKey.MapKey());
+    if (it == mapIdentities.end() || it == mapIdentities.begin() || CIdentityMapKey((--it)->first).idID != idMapKey.idID)
+    {
+        return false;
+    }
+    keyAndIdentity = make_pair(CIdentityMapKey(it->first), it->second);
+    return true;
+}
+
+bool CBasicKeyStore::GetIdentities(std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &mine, 
+                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &imsigner, 
+                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &notmine)
+{
+    std::set<CIdentityID> identitySet;
+
     for (auto &identity : mapIdentities)
     {
-        CIdentityMapKey idKey(identity.first);
-        if (idKey.flags & idKey.CAN_SPEND)
+        identitySet.insert(identity.second.GetID());
+    }
+
+    for (auto &idID : identitySet)
+    {
+        std::pair<CIdentityMapKey, CIdentityMapValue> primaryIdentity;
+        if (GetIdentity(idID, primaryIdentity))
         {
-            mine.push_back(make_pair(idKey, &identity.second));
-        }
-        else if (idKey.flags & idKey.CAN_SIGN)
-        {
-            imsigner.push_back(make_pair(idKey, &identity.second));
-        }
-        else
-        {
-            notmine.push_back(make_pair(idKey, &identity.second));
+            std::pair<CIdentityMapKey, CIdentityMapValue> revocationAuthority;
+            std::pair<CIdentityMapKey, CIdentityMapValue> recoveryAuthority;
+
+            CIdentityMapKey idKey(primaryIdentity.first);
+
+            // consider our canspend and cansign on revocation and recovery
+            if (!primaryIdentity.second.IsRevoked() && primaryIdentity.second.revocationAuthority != idID)
+            {
+                if (GetIdentity(primaryIdentity.second.revocationAuthority, revocationAuthority))
+                {
+                    idKey.flags |= (CIdentityMapKey(revocationAuthority.first).flags & (idKey.CAN_SPEND | idKey.CAN_SIGN));
+                }
+            }
+
+            if (primaryIdentity.second.IsRevoked() && primaryIdentity.second.recoveryAuthority != idID)
+            {
+                if (GetIdentity(primaryIdentity.second.recoveryAuthority, recoveryAuthority))
+                {
+                    idKey.flags |= (CIdentityMapKey(recoveryAuthority.first).flags & (idKey.CAN_SPEND | idKey.CAN_SIGN));
+                }
+            }
+
+            if (idKey.flags & idKey.CAN_SPEND)
+            {
+                mine.push_back(make_pair(idKey, primaryIdentity.second));
+            }
+            else if (idKey.flags & idKey.CAN_SIGN)
+            {
+                imsigner.push_back(make_pair(idKey, primaryIdentity.second));
+            }
+            else
+            {
+                notmine.push_back(make_pair(idKey, primaryIdentity.second));
+            }
         }
     }
     return (mine.size() || imsigner.size() || notmine.size());
+}
+
+// returns a set of key IDs that have private keys in this wallet and control the identities in this wallet
+std::set<CKeyID> CBasicKeyStore::GetIdentityKeyIDs()
+{
+    std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> mine;
+    std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> imsigner;
+    std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> notmine;
+
+    std::set<CKeyID> ret;
+    if (GetIdentities(mine, imsigner, notmine))
+    {
+        for (auto &idpair : mine)
+        {
+            for (auto &dest : idpair.second.primaryAddresses)
+            {
+                CKeyID keyid = GetDestinationID(dest);
+                if (HaveKey(keyid))
+                {
+                    ret.insert(keyid);
+                }
+            }
+        }
+        for (auto &idpair : imsigner)
+        {
+            for (auto &dest : idpair.second.primaryAddresses)
+            {
+                CKeyID keyid = GetDestinationID(dest);
+                if (HaveKey(keyid))
+                {
+                    ret.insert(keyid);
+                }
+            }
+        }
+    }
+    return ret;
 }
 
 bool CBasicKeyStore::AddWatchOnly(const CScript &dest)

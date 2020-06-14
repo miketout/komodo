@@ -74,7 +74,7 @@ inline uint256 Hash(const T1 pbegin, const T1 pend)
 {
     static const unsigned char pblank[1] = {};
     uint256 result;
-    CHash256().Write(pbegin == pend ? pblank : (const unsigned char*)&pbegin[0], (pend - pbegin) * sizeof(pbegin[0]))
+    CHash256().Write(pbegin == pend ? pblank : (const unsigned char*)&(*pbegin), (pend - pbegin) * sizeof(*pbegin))
               .Finalize((unsigned char*)&result);
     return result;
 }
@@ -169,6 +169,13 @@ public:
     }
 };
 
+template <typename SERIALIZABLE>
+uint256 GetHash(const SERIALIZABLE &obj)
+{
+    CHashWriter hw(SER_GETHASH, PROTOCOL_VERSION);
+    hw << obj;
+    return hw.GetHash();
+}
 
 /** A writer stream (for serialization) that computes a 256-bit hash. */
 class CHashWriterSHA256
@@ -210,6 +217,7 @@ public:
     }
 };
 
+const unsigned char BLAKE2Bpersonal[crypto_generichash_blake2b_PERSONALBYTES]={'V','e','r','u','s','D','e','f','a','u','l','t','H','a','s','h'};
 
 /** A writer stream (for serialization) that computes a 256-bit BLAKE2b hash. */
 class CBLAKE2bWriter
@@ -221,7 +229,11 @@ public:
     int nType;
     int nVersion;
 
-    CBLAKE2bWriter(int nTypeIn, int nVersionIn, const unsigned char* personal) : nType(nTypeIn), nVersion(nVersionIn) {
+    CBLAKE2bWriter(int nTypeIn, 
+                   int nVersionIn,
+                   const unsigned char *personal=BLAKE2Bpersonal) : 
+                   nType(nTypeIn), nVersion(nVersionIn)
+    {
         assert(crypto_generichash_blake2b_init_salt_personal(
             &state,
             NULL, 0, // No key.

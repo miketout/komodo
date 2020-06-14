@@ -269,10 +269,91 @@ const char *Notaries_elected2[][2] =
     {"decker_AR", "03ffdf1a116300a78729608d9930742cd349f11a9d64fcc336b8f18592dd9c91bc" }, // 63
 };
 
+#define KOMODO_NOTARIES_TIMESTAMP4 1592146800 // Sunday, June 14th, 2020 03:00:00 PM UTC
+#define KOMODO_NOTARIES_HEIGHT4 ((1053300 / KOMODO_ELECTION_GAP) * KOMODO_ELECTION_GAP)
+
+const char *Notaries_elected4[][2] =
+{
+    {"alien_AR", "024f20c096b085308e21893383f44b4faf1cdedea9ad53cc7d7e7fbfa0c30c1e71" },
+    {"alien_EU", "022b85908191788f409506ebcf96a892f3274f352864c3ed566c5a16de63953236" },
+    {"strob_NA", "02285bf2f9e96068ecac14bc6f770e394927b4da9f5ba833eaa9468b5d47f203a3" },
+    {"titomane_SH", "02abf206bafc8048dbdc042b8eb6b1e356ea5dbe149eae3532b4811d4905e5cf01" },
+    {"fullmoon_AR", "03639bc56d3fecf856f17759a441c5893668e7c2d460f3d216798a413cd6766bb2" },
+    {"phba2061_EU", "03369187ce134bd7793ee34af7756fe1ab27202e09306491cdd5d8ad2c71697937" },
+    {"fullmoon_NA", "03e388bcc579ac2675f8fadfa921eec186dcea8d2b43de1eed6caba23d5a962b74" },
+    {"fullmoon_SH", "03a5cfda2b097c808834ccdd805828c811b519611feabdfe6b3644312e53f6748f" },
+    {"madmax_AR", "027afddbcf690230dd8d435ec16a7bfb0083e6b77030f763437f291dfc40a579d0" },
+    {"titomane_EU", "02276090e483db1a01a802456b10831b3b6e0a6ad3ece9b2a01f4aad0e480c8edc" },
+    {"cipi_NA", "03f4e69edcb4fa3b2095cb8cb1ca010f4ec4972eac5d8822397e5c8d87aa21a739" },
+    {"indenodes_SH", "031d1584cf0eb4a2d314465e49e2677226b1615c3718013b8d6b4854c15676a58c" },
+    {"decker_AR", "02a85540db8d41c7e60bf0d33d1364b4151cad883dd032878ea4c037f67b769635" },
+    {"indenodes_EU", "03a416533cace0814455a1bb1cd7861ce825a543c6f6284a432c4c8d8875b7ace9" },
+    {"madmax_NA", "036d3afebe1eab09f4c38c3ee6a4659ad390f3df92787c11437a58c59a29e408e6" },
+    {"chainzilla_SH", "0311dde03c2dd654ce78323b718ed3ad73a464d1bde97820f3395f54788b5420dd" },
+    {"peer2cloud_AR", "0243958faf9ae4d43b598b859ddc595c170c4cf50f8e4517d660ae5bc72aeb821b" },
+    {"pirate_EU", "0240011b95cde819f298fe0f507b2260c9fecdab784924076d4d1e54c522103cb1" },
+    {"webworker01_NA", "02de90c720c007229374772505a43917a84ed129d5fbcfa4949cc2e9b563351124" },
+    {"zatjum_SH", "0241c5660ca540780be66603b1791127a1261d56abbcb7562c297eec8e4fc078fb" },
+    {"titomane_AR", "03958bd8d13fe6946b8d0d0fbbc3861c72542560d0276e80a4c6b5fe55bc758b81" },
+    {"chmex_EU", "030bf7bd7ad0515c33b5d5d9a91e0729baf801b9002f80495ae535ea1cebb352cb" },
+    {"indenodes_NA", "02b3908eda4078f0e9b6704451cdc24d418e899c0f515fab338d7494da6f0a647b" },
+    {"patchkez_SH", "028c08db6e7242681f50db6c234fe3d6e12fb1a915350311be26373bac0d457d49" },
+    {"metaphilibert_AR", "0239e34ad22957bbf4c8df824401f237b2afe8d40f7a645ecd43e8f27dde1ab0da" },
+    {"etszombi_EU", "03a5c083c78ba397970f20b544a01c13e7ed36ca8a5ae26d5fe7bd38b92b6a0c94" },
+    {"pirate_NA", "02ad7ef25d2dd461e361120cd3efe7cbce5e9512c361e9185aac33dd303d758613" },
+    {"metaphilibert_SH", "03b21ff042bf1730b28bde43f44c064578b41996117ac7634b567c3773089e3be3" },
+    {"indenodes_AR", "0242778789986d614f75bcf629081651b851a12ab1cc10c73995b27b90febb75a2" },
+    {"chainmakers_NA", "028803e07bcc521fde264b7191a944f9b3612e8ee4e24a99bcd903f6976240839a" },
+    {"mihailo_EU", "036494e7c9467c8c7ff3bf29e841907fb0fa24241866569944ea422479ec0e6252" },
+    {"tonyl_AR", "0229e499e3f2e065ced402ceb8aaf3d5ab8bd3793aa074305e9fa30772ce604908" },
+    {"alien_NA", "022f62b56ddfd07c9860921c701285ac39bb3ac8f6f083d1b59c8f4943be3de162" },
+    {"pungocloud_SH", "02641c36ae6747b88150a463a1fe65cf7a9d1c00a64387c73f296f0b64e77c7d3f" },
+    {"node9_EU", "0392e4c9400e69f28c6b9e89d586da69d5a6af7702f1045eaa6ebc1996f0496e1f" },
+    {"smdmitry_AR", "0397b7584cb29717b721c0c587d4462477efc1f36a56921f133c9d17b0cd7f278a" },
+    {"nodeone_NA", "0310a249c6c2dcc29f2135715138a9ddb8e01c0eab701cbd0b96d9cec660dbdc58" },
+    {"gcharang_SH", "02a654037d12cdd609f4fad48e15ec54538e03f61fdae1acb855f16ebacac6bd73" },
+    {"cipi_EU", "026f4f66385daaf8313ef30ffe4988e7db497132682dca185a70763d93e1417d9d" },
+    {"etszombi_AR", "03bfcbca83f11e622fa4eed9a1fa25dba377981ea3b22e3d0a4015f9a932af9272" },
+    {"pbca26_NA", "03c18431bb6bc95672f640f19998a196becd2851d5dcba4795fe8d85b7d77eab81" },
+    {"mylo_SH", "026d5f29d09ff3f33e14db4811606249b2438c6bcf964876714f81d1f2d952acde" },
+    {"swisscertifiers_EU", "02e7722ebba9f8b5ebfb4e87d4fa58cc75aef677535b9cfc060c7d9471aacd9c9e" },
+    {"marmarachain_AR", "028690ca1e3afdf8a38b421f6a41f5ff407afc96d5a7a6a488330aae26c8b086bb" },
+    {"karasugoi_NA", "02f803e6f159824a181cc5d709f3d1e7ff65f19e1899920724aeb4e3d2d869f911" },
+    {"phm87_SH", "03889a10f9df2caef57220628515693cf25316fe1b0693b0241419e75d0d0e66ed" },
+    {"oszy_EU", "03c53bd421de4a29ce68c8cc83f802e1181e77c08f8f16684490d61452ea8d023a" },
+    {"chmex_AR", "030cd487e10fbf142e0e8d582e702ecb775f378569c3cb5acd0ff97b6b12803588" },
+    {"dragonhound_NA", "029912212d370ee0fb4d38eefd8bfcd8ab04e2c3b0354020789c29ddf2a35c72d6" },
+    {"strob_SH", "0213751a1c59d3489ca85b3d62a3d606dcef7f0428aa021c1978ea16fb38a2fad6" },
+    {"madmax_EU", "0397ec3a4ad84b3009566d260c89f1c4404e86e5d044964747c9371277e38f5995" },
+    {"dudezmobi_AR", "033c121d3f8d450174674a73f3b7f140b2717a7d51ea19ee597e2e8e8f9d5ed87f" },
+    {"daemonfox_NA", "023c7584b1006d4a62a4b4c9c1ede390a3789316547897d5ed49ff9385a3acb411" },
+    {"nutellalicka_SH", "0284c4d3cb97dd8a32d10fb32b1855ae18cf845dad542e3b8937ca0e998fb54ecc" },
+    {"starfleet_EU", "03c6e047218f34644ccba67e317b9da5d28e68bbbb6b9973aef1281d2bafa46496" },
+    {"mrlynch_AR", "03e67440141f53a08684c329ebc852b018e41f905da88e52aa4a6dc5aa4b12447a" },
+    {"greer_NA", "0262da6aaa0b295b8e2f120035924758a4a630f899316dc63ee15ef03e9b7b2b23" },
+    {"mcrypt_SH", "027a4ca7b11d3456ff558c08bb04483a89c7f383448461fd0b6b3b07424aabe9a4" },
+    {"decker_EU", "027777775b89ff548c3be54fb0c9455437d87f38bfce83bdef113899881b219c9e" },
+    {"dappvader_SH", "025199bc04bcb8a17976d9fe8bc87763a6150c2727321aa59bf34a2b49f2f3a0ce" },
+    {"alright_DEV", "03b6f9493658bdd102503585a08ae642b49d6a68fb69ac3626f9737cd7581abdfa" },
+    {"artemii235_DEV", "037a20916d2e9ea575300ac9d729507c23a606b9a200c8e913d7c9832f912a1fa7" },
+    {"tonyl_DEV", "0258b77d7dcfc6c2628b0b6b438951a6e74201fb2cd180a795e4c37fcf8e78a678" },
+    {"decker_DEV", "02fca8ee50e49f480de275745618db7b0b3680b0bdcce7dcae7d2e0fd5c3345744" }
+};
+
 int32_t komodo_notaries(uint8_t pubkeys[64][33],int32_t height,uint32_t timestamp)
 {
-    static uint8_t elected_pubkeys0[64][33], elected_pubkeys1[64][33], elected_pubkeys2[64][33], did0, did1, did2; static int32_t n0,n1,n2;
-    int32_t i,htind,n; uint64_t mask = 0; struct knotary_entry *kp,*tmp;
+    static uint8_t elected_pubkeys0[64][33],
+                   elected_pubkeys1[64][33],
+                   elected_pubkeys2[64][33],
+                   elected_pubkeys4[64][33],
+                   did0,
+                   did1,
+                   did2,
+                   did4; 
+    static int32_t n0, n1, n2, n4;
+    int32_t i, htind, n;
+    uint64_t mask = 0;
+    struct knotary_entry *kp,*tmp;
     if ( timestamp == 0 && ASSETCHAINS_SYMBOL[0] != 0 )
         timestamp = komodo_heightstamp(height);
     else if ( ASSETCHAINS_SYMBOL[0] == 0 )
@@ -307,7 +388,7 @@ int32_t komodo_notaries(uint8_t pubkeys[64][33],int32_t height,uint32_t timestam
             memcpy(pubkeys, elected_pubkeys1, n1 * 33);
             return(n1);
         }
-        else //if ( (timestamp != 0 && timestamp <= KOMODO_NOTARIES_TIMESTAMP3) || height <= KOMODO_NOTARIES_HEIGHT3 )
+        else if ( (timestamp != 0 && timestamp <= KOMODO_NOTARIES_TIMESTAMP4) || height <= KOMODO_NOTARIES_HEIGHT4 )
         {
             if ( did2 == 0 )
             {
@@ -320,6 +401,20 @@ int32_t komodo_notaries(uint8_t pubkeys[64][33],int32_t height,uint32_t timestam
             }
             memcpy(pubkeys, elected_pubkeys2, n2 * 33);
             return(n2);
+        }
+        else
+        {
+            if ( did4 == 0 )
+            {
+                n4 = (int32_t)(sizeof(Notaries_elected4)/sizeof(*Notaries_elected4));
+                for (i=0; i<n4; i++)
+                    decode_hex(elected_pubkeys4[i],33,(char *)Notaries_elected4[i][1]);
+                if ( 0 && ASSETCHAINS_SYMBOL[0] != 0 )
+                    fprintf(stderr,"%s height.%d t.%u elected.%d notaries2\n",ASSETCHAINS_SYMBOL,height,timestamp,n4);
+                did4 = 1;
+            }
+            memcpy(pubkeys, elected_pubkeys4, n4 * 33);
+            return(n4);
         }
     }
     htind = height / KOMODO_ELECTION_GAP;
