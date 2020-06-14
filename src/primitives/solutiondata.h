@@ -20,13 +20,14 @@ class CActivationHeight
         enum {
             MAX_HEIGHT = INT_MAX,
             DEFAULT_UPGRADE_HEIGHT = MAX_HEIGHT,
-            NUM_VERSIONS = 6,
+            NUM_VERSIONS = 7,   // NEVER ADD A NEW VERSION WITHOUT UPDATING THE ARRAY BELOW WITH ALL ENTRIES PRESENT
             SOLUTION_VERUSV1 = 0,
             SOLUTION_VERUSV2 = 1,
             SOLUTION_VERUSV3 = 2,
             SOLUTION_VERUSV4 = 3,
             SOLUTION_VERUSV5 = 4,
-            SOLUTION_VERUSV6 = 5,
+            SOLUTION_VERUSV5_1 = 5,
+            SOLUTION_VERUSV6 = 6,
             ACTIVATE_VERUSHASH2 = SOLUTION_VERUSV2,
             ACTIVATE_EXTENDEDSOLUTION = SOLUTION_VERUSV3,
             ACTIVATE_IDENTITY = SOLUTION_VERUSV4,
@@ -39,7 +40,7 @@ class CActivationHeight
         };
         bool active;
         int32_t heights[NUM_VERSIONS];
-        CActivationHeight() : heights{0, DEFAULT_UPGRADE_HEIGHT, DEFAULT_UPGRADE_HEIGHT, DEFAULT_UPGRADE_HEIGHT, DEFAULT_UPGRADE_HEIGHT}, active(true) {}
+        CActivationHeight() : heights{0, DEFAULT_UPGRADE_HEIGHT, DEFAULT_UPGRADE_HEIGHT, DEFAULT_UPGRADE_HEIGHT, DEFAULT_UPGRADE_HEIGHT, DEFAULT_UPGRADE_HEIGHT, DEFAULT_UPGRADE_HEIGHT}, active(true) {}
 
         void SetActivationHeight(int32_t version, int32_t height)
         {
