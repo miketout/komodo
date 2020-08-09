@@ -170,7 +170,9 @@ void IncrementExtraNonce(CBlock* pblock, CBlockIndex* pindexPrev, unsigned int &
 
     int32_t nHeight = pindexPrev->GetHeight() + 1;
 
-    if (CConstVerusSolutionVector::activationHeight.ActiveVersion(nHeight) >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS_HEADER)
+    int solutionVersion = CConstVerusSolutionVector::activationHeight.ActiveVersion(nHeight);
+
+    if (solutionVersion >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS_HEADER)
     {
         // coinbase should already be finalized in the new version
         if (buildMerkle)
@@ -185,20 +187,12 @@ void IncrementExtraNonce(CBlock* pblock, CBlockIndex* pindexPrev, unsigned int &
 
         UpdateTime(pblock, Params().GetConsensus(), pindexPrev);
 
-        uint256 mmvRoot;
-        {
-            LOCK(cs_main);
-            // set the PBaaS header
-            ChainMerkleMountainView mmv = chainActive.GetMMV();
-            mmvRoot = mmv.GetRoot();
-        }
-
-        pblock->AddUpdatePBaaSHeader();
-
         // POS blocks have already had their solution space filled, and there is no actual extra nonce, extradata is used
         // for POS proof, so don't modify it
-        if (!pblock->IsVerusPOSBlock())
+        if (solutionVersion >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS && !pblock->IsVerusPOSBlock())
         {
+            pblock->AddUpdatePBaaSHeader();
+
             uint8_t dummy;
             // clear extra data to allow adding more PBaaS headers
             pblock->SetExtraData(&dummy, 0);
@@ -552,26 +546,45 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& _
     uint256 cbHash;
 
     CBlockIndex* pindexPrev = 0;
+    bool loop = true;
+    while (loop)
     {
-        LOCK2(cs_main, mempool.cs);
-        pindexPrev = chainActive.LastTip();
-        const int nHeight = pindexPrev->GetHeight() + 1;
+        loop = false;
+        int nHeight;
         const Consensus::Params &consensusParams = chainparams.GetConsensus();
-        uint32_t consensusBranchId = CurrentEpochBranchId(nHeight, consensusParams);
-        bool sapling = consensusParams.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_SAPLING);
+        uint32_t consensusBranchId;
+        bool sapling = true;
+        int64_t nMedianTimePast = 0;
+        uint32_t proposedTime = 0;
 
-        const int64_t nMedianTimePast = pindexPrev->GetMedianTimePast();
-        uint32_t proposedTime = GetAdjustedTime();
-        if (proposedTime == nMedianTimePast)
         {
-            // too fast or stuck, this addresses the too fast issue, while moving
-            // forward as quickly as possible
-            for (int i; i < 100; i++)
+            while (proposedTime == nMedianTimePast)
             {
+                if (proposedTime)
+                {
+                    MilliSleep(20);
+                }
+                LOCK(cs_main);
+                pindexPrev = chainActive.LastTip();
+                nHeight = pindexPrev->GetHeight() + 1;
+                consensusBranchId = CurrentEpochBranchId(nHeight, consensusParams);
+                sapling = consensusParams.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_SAPLING);
+                nMedianTimePast = pindexPrev->GetMedianTimePast();
                 proposedTime = GetAdjustedTime();
+
                 if (proposedTime == nMedianTimePast)
-                    MilliSleep(10);
+                {
+                    boost::this_thread::interruption_point();
+                }
             }
+        }
+
+        LOCK2(cs_main, mempool.cs);
+        if (pindexPrev != chainActive.LastTip())
+        {
+            // try again
+            loop = true;
+            continue;
         }
         pblock->nTime = GetAdjustedTime();
 
@@ -1028,6 +1041,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& _
             {
                 CBlock block;
                 assert(nHeight > 1);
+                LOCK(cs_main);
                 currencyState = ConnectedChains.GetCurrencyState(nHeight - 1);
                 currencyState.ClearForNextBlock();
 
@@ -1144,14 +1158,11 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& _
         }
         else
         {
-            if (nHeight == 1)
-            {
-                SetBlockOnePremine(thisChain.GetTotalPreallocation());
-            }
             totalEmission = GetBlockSubsidy(nHeight, consensusParams);
             blockSubsidy = totalEmission;
             currencyState.UpdateWithEmission(totalEmission);
 
+            /*
             if (CConstVerusSolutionVector::activationHeight.IsActivationHeight(CActivationHeight::ACTIVATE_PBAAS, nHeight))
             {
                 // at activation height for PBaaS on VRSC or VRSCTEST, add currency definition, import, and export outputs to the coinbase
@@ -1169,30 +1180,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& _
                                                              &ConnectedChains.ThisChain()),
                                             &indexDests)));
             }
-        }
-
-        // on all chains, we add an export and import to ourselves at PBaaS activation height (1 for PBaaS chains)
-        if (CConstVerusSolutionVector::activationHeight.IsActivationHeight(CActivationHeight::ACTIVATE_PBAAS, nHeight))
-        {
-            // create the import thread output
-            cp = CCinit(&CC, EVAL_CROSSCHAIN_IMPORT);
-            pkCC = CPubKey(ParseHex(CC.CChexstr));
-
-            // import thread from self
-            std::vector<CTxDestination> indexDests = std::vector<CTxDestination>({CKeyID(CCrossChainRPCData::GetConditionID(ConnectedChains.ThisChain().GetID(), EVAL_CROSSCHAIN_IMPORT))});
-            std::vector<CTxDestination> dests = std::vector<CTxDestination>({pkCC});
-
-            CCrossChainImport cci = CCrossChainImport(ConnectedChains.ThisChain().GetID(), CCurrencyValueMap());
-            coinbaseTx.vout.push_back(CTxOut(0, MakeMofNCCScript(CConditionObj<CCrossChainImport>(EVAL_CROSSCHAIN_IMPORT, dests, 1, &cci), &indexDests)));
-
-            // export thread to self
-            cp = CCinit(&CC, EVAL_CROSSCHAIN_EXPORT);
-            pkCC = CPubKey(ParseHex(CC.CChexstr));
-            indexDests = std::vector<CTxDestination>({CKeyID(CCrossChainRPCData::GetConditionID(ConnectedChains.ThisChain().GetID(), EVAL_CROSSCHAIN_EXPORT))});
-            dests = std::vector<CTxDestination>({pkCC});
-
-            CCrossChainExport ccx(ConnectedChains.ThisChain().GetID(), 0, CCurrencyValueMap(), CCurrencyValueMap());
-            coinbaseTx.vout.push_back(CTxOut(0, MakeMofNCCScript(CConditionObj<CCrossChainExport>(EVAL_CROSSCHAIN_EXPORT, dests, 1, &ccx), &indexDests)));
+            */
         }
 
         // process any imports from the current chain to itself, to suport token launches, etc.
@@ -1440,7 +1428,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& _
             CReserveTransactionDescriptor txDesc;
             bool isReserve = mempool.IsKnownReserveTransaction(hash, txDesc);
 
-            nTxFees = view.GetValueIn(chainActive.LastTip()->GetHeight(),&interest,tx,chainActive.LastTip()->nTime)-tx.GetValueOut();
+            nTxFees = view.GetValueIn(chainActive.LastTip()->GetHeight(),&interest,tx,chainActive.LastTip()->nTime) - tx.GetValueOut();
             
             nTxSigOps += GetP2SHSigOpCount(tx, view);
             if (nBlockSigOps + nTxSigOps >= MAX_BLOCK_SIGOPS-1)
@@ -1464,7 +1452,6 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& _
 
             if (isReserve)
             {
-                nTxFees = 0;            // we will adjust all reserve transaction fees when we get an accurate conversion rate
                 reservePositions.push_back(nBlockTx);
                 haveReserveTransactions = true;
             }
@@ -1511,7 +1498,7 @@ CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& _
         // 3. match orders to include all limit transactions that qualify and will fit
         CAmount conversionFees = 0;
 
-        if (haveReserveTransactions)
+        if (!IsVerusActive() && haveReserveTransactions)
         {
             std::vector<CReserveTransactionDescriptor> reserveFills;
             std::vector<CReserveTransactionDescriptor> noFills;
@@ -2066,10 +2053,8 @@ void GetScriptForMinerAddress(boost::shared_ptr<CReserveScript> &script)
     }
 
     boost::shared_ptr<MinerAddressScript> mAddr(new MinerAddressScript());
-    CKeyID keyID = boost::get<CKeyID>(addr);
-
     script = mAddr;
-    script->reserveScript = CScript() << OP_DUP << OP_HASH160 << ToByteVector(keyID) << OP_EQUALVERIFY << OP_CHECKSIG;
+    script->reserveScript = GetScriptForDestination(addr);
 }
 
 #ifdef ENABLE_WALLET
@@ -2080,7 +2065,12 @@ void GetScriptForMinerAddress(boost::shared_ptr<CReserveScript> &script)
 
 CBlockTemplate* CreateNewBlockWithKey(CReserveKey& reservekey, int32_t nHeight, int32_t gpucount, bool isStake)
 {
-    CPubKey pubkey; CScript scriptPubKey; uint8_t *ptr; int32_t i;
+    CPubKey pubkey; 
+    CScript scriptPubKey; 
+    uint8_t *ptr; 
+    int32_t i;
+    boost::shared_ptr<CReserveScript> coinbaseScript;
+ 
     if ( nHeight == 1 && ASSETCHAINS_OVERRIDE_PUBKEY33[0] != 0 )
     {
         scriptPubKey = CScript() << ParseHex(ASSETCHAINS_OVERRIDE_PUBKEY) << OP_CHECKSIG;
@@ -2090,7 +2080,7 @@ CBlockTemplate* CreateNewBlockWithKey(CReserveKey& reservekey, int32_t nHeight, 
         //fprintf(stderr,"use notary pubkey\n");
         scriptPubKey = CScript() << ParseHex(NOTARY_PUBKEY) << OP_CHECKSIG;
     }
-    else
+    else if (GetArg("-mineraddress", "").empty() || !(GetScriptForMinerAddress(coinbaseScript), (scriptPubKey = coinbaseScript->reserveScript).size()))
     {
         if (!isStake)
         {
@@ -2420,7 +2410,7 @@ void static VerusStaker(CWallet *pwallet)
                                                      sTx.vin[0].prevout.hash, 
                                                      sTx.vin[0].prevout.n, 
                                                      newHeight, 
-                                                     chainActive.GetVerusEntropyHash(Mining_height), 
+                                                     chainActive.GetVerusEntropyHash(newHeight), 
                                                      sTx.vout[0].nValue).GetHex().c_str(), 
                                                      ArithToUint256(post).GetHex().c_str());
                 if (unlockTime > newHeight && subsidy >= ASSETCHAINS_TIMELOCKGTE)
@@ -2601,7 +2591,7 @@ void static BitcoinMiner_noeq()
                 sleep(2);
                 continue;
             }
-            bool verusSolutionPBaaS = solutionVersion >= CActivationHeight::SOLUTION_VERUSV5_1;
+            bool verusSolutionPBaaS = solutionVersion >= CActivationHeight::ACTIVATE_PBAAS;
 
             // v2 hash writer with adjustments for the current height
             CVerusHashV2bWriter ss2 = CVerusHashV2bWriter(SER_GETHASH, PROTOCOL_VERSION, solutionVersion);

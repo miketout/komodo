@@ -372,7 +372,9 @@ uint160 CurrencyNameToChainID(std::string currencyStr)
     return retVal;
 }
 
-CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
+CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj) :
+    preLaunchDiscount(0),
+    initialFractionalSupply(0)
 {
     try
     {
@@ -437,62 +439,147 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
             LogPrintf("%s: notarization protocol must be %d at this time\n", __func__, (int)NOTARIZATION_AUTO);
             nVersion = PBAAS_VERSION_INVALID;
         }
-        int32_t totalReserveWeight = AmountFromValueNoErr(find_value(obj, "reserveratio"));
+
+        int32_t totalReserveWeight = IsFractional() ? SATOSHIDEN : 0;
         UniValue currencyArr = find_value(obj, "currencies");
         UniValue weightArr = find_value(obj, "weights");
         UniValue conversionArr = find_value(obj, "conversions");
         UniValue minPreconvertArr = find_value(obj, "minpreconversion");
         UniValue maxPreconvertArr = find_value(obj, "maxpreconversion");
         UniValue initialContributionArr = find_value(obj, "initialcontributions");
-        UniValue preConversionsArr = find_value(obj, "preconversions");
-
-        bool convertible = false;
 
         if (currencyArr.isArray() && currencyArr.size())
         {
-            // if weights are defined, make sure they are defined correctly, if not, define them
-            if (weightArr.isArray() && weightArr.size())
+            contributions = preconverted = std::vector<int64_t>(currencyArr.size());
+
+            if (IsFractional())
             {
-                if (weightArr.size() != currencyArr.size())
+                preLaunchDiscount = AmountFromValueNoErr(find_value(obj, "prelaunchdiscount"));
+                initialFractionalSupply = AmountFromValueNoErr(find_value(obj, "initialsupply"));
+
+                if (!initialFractionalSupply)
                 {
-                    LogPrintf("%s: reserve currency weights must be specified for all currencies\n", __func__);
+                    LogPrintf("%s: cannot specify zero initial supply for fractional currency\n", __func__);
+                    printf("%s: cannot specify zero initial supply for fractional currency\n", __func__);
                     nVersion = PBAAS_VERSION_INVALID;
                 }
-                else
+
+                UniValue preLaunchCarveoutsUni = find_value(obj, "prelaunchcarveouts");
+                int32_t preLaunchCarveOutTotal = 0;
+                if (nVersion != PBAAS_VERSION_INVALID && preLaunchCarveoutsUni.isArray())
                 {
-                    for (int i = 0; i < currencyArr.size(); i++)
+                    for (int i = 0; i < preLaunchCarveoutsUni.size(); i++)
                     {
-                        int32_t weight = (int32_t)AmountFromValueNoErr(weightArr[i]);
-                        if (weight <= 0)
+                        std::vector<std::string> preLaunchCarveOutKey = preLaunchCarveoutsUni[i].getKeys();
+                        std::vector<UniValue> preLaunchCarveOutValue = preLaunchCarveoutsUni[i].getValues();
+                        if (preLaunchCarveOutKey.size() != 1 || preLaunchCarveOutValue.size() != 1)
                         {
+                            LogPrintf("%s: each prelaunchcarveouts entry must contain one destination identity and one amount\n", __func__);
+                            printf("%s: each prelaunchcarveouts entry must contain one destination identity and one amount\n", __func__);
                             nVersion = PBAAS_VERSION_INVALID;
                             break;
                         }
-                        weights.push_back(weight);
+
+                        CTxDestination carveOutDest = DecodeDestination(preLaunchCarveOutKey[0]);
+
+                        if (carveOutDest.which() != COptCCParams::ADDRTYPE_ID && !(carveOutDest.which() == COptCCParams::ADDRTYPE_INVALID && preLaunchCarveoutsUni.size() == 1))
+                        {
+                            LogPrintf("%s: prelaunchcarveouts destination must be an identity\n", __func__);
+                            nVersion = PBAAS_VERSION_INVALID;
+                            break;
+                        }
+
+                        CAmount carveOutAmount = AmountFromValueNoErr(preLaunchCarveOutValue[0]);
+                        if (carveOutAmount <= 0)
+                        {
+                            LogPrintf("%s: prelaunchcarveouts values must be greater than zero\n", __func__);
+                            nVersion = PBAAS_VERSION_INVALID;
+                            break;
+                        }
+                        preLaunchCarveOutTotal += carveOutAmount;
+                        if (preLaunchDiscount < 0 || 
+                            preLaunchDiscount >= SATOSHIDEN ||
+                            CCurrencyDefinition::CalculateRatioOfValue((totalReserveWeight - preLaunchCarveOutTotal), SATOSHIDEN - preLaunchDiscount) >= SATOSHIDEN)
+                        {
+                            LogPrintf("%s: prelaunchcarveouts values and discounts must total less than 1\n", __func__);
+                            nVersion = PBAAS_VERSION_INVALID;
+                            break;
+                        }
+                        preLaunchCarveOuts.push_back(make_pair(CIdentityID(GetDestinationID(carveOutDest)), preLaunchCarveOutTotal));
                     }
                 }
-            }
-            else if (totalReserveWeight)
-            {
-                uint32_t oneWeight = totalReserveWeight / SATOSHIDEN;
-                uint32_t mod = totalReserveWeight % SATOSHIDEN;
-                for (int i = 0; i < currencyArr.size(); i++)
+
+                // if weights are defined, use them as relative ratios of each member currency
+                if (weightArr.isArray() && weightArr.size())
                 {
-                    // distribute remainder of weight among first come currencies
-                    int32_t weight = oneWeight;
-                    if (mod > 0)
+                    if (weightArr.size() != currencyArr.size())
                     {
-                        weight++;
-                        mod--;
+                        LogPrintf("%s: reserve currency weights must be specified for all currencies\n", __func__);
+                        nVersion = PBAAS_VERSION_INVALID;
                     }
-                    weights.push_back(weight);
+                    else
+                    {
+                        CAmount total = 0;
+                        for (int i = 0; i < currencyArr.size(); i++)
+                        {
+                            int32_t weight = (int32_t)AmountFromValueNoErr(weightArr[i]);
+                            if (weight <= 0)
+                            {
+                                nVersion = PBAAS_VERSION_INVALID;
+                                total = 0;
+                                break;
+                            }
+                            total += weight;
+                            weights.push_back(weight);
+                        }
+                        if (nVersion != PBAAS_VERSION_INVALID)
+                        {
+                            // calculate each weight as a relative part of the total
+                            // reserve weight
+                            int64_t totalRelativeWeight = 0;
+                            for (auto &onew : weights)
+                            {
+                                totalRelativeWeight += onew;
+                            }
+
+                            int weightIdx;
+                            arith_uint256 bigReserveWeight(totalReserveWeight);
+                            int32_t reserveLeft = totalReserveWeight;
+                            for (weightIdx = 0; weightIdx < weights.size(); weightIdx++)
+                            {
+                                CAmount amount = (bigReserveWeight * arith_uint256(weights[weightIdx]) / arith_uint256(totalRelativeWeight)).GetLow64();
+                                if (reserveLeft <= amount || (weightIdx + 1) == weights.size())
+                                {
+                                    amount = reserveLeft;
+                                }
+                                reserveLeft -= amount;
+                                weights[weightIdx] = amount;
+                            }
+                        }
+                    }
+                }
+                else if (totalReserveWeight)
+                {
+                    uint32_t oneWeight = totalReserveWeight / currencyArr.size();
+                    uint32_t mod = totalReserveWeight % currencyArr.size();
+                    for (int i = 0; i < currencyArr.size(); i++)
+                    {
+                        // distribute remainder of weight among first come currencies
+                        int32_t weight = oneWeight;
+                        if (mod > 0)
+                        {
+                            weight++;
+                            mod--;
+                        }
+                        weights.push_back(weight);
+                    }
                 }
             }
 
             // if we have weights, we can be a fractional currency
             if (weights.size())
             {
-                // if we are a reserve currency, explicit conversion values are not valid
+                // if we are fractional, explicit conversion values are not valid
                 // and are based on non-zero, initial contributions relative to supply
                 if ((conversionArr.isArray() && conversionArr.size()) ||
                     !initialContributionArr.isArray() || 
@@ -503,15 +590,16 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
                     LogPrintf("%s: reserve currencies must have weights, initial contributions in every currency, and no explicit conversion rates\n", __func__);
                     nVersion = PBAAS_VERSION_INVALID;
                 }
-                else
-                {
-                    convertible = true;
-                }
             }
             else
             {
                 // if we are not a reserve currency, we either have a conversion vector, or we are not convertible at all
-                if (conversionArr.isArray() && conversionArr.size() && conversionArr.size() != currencyArr.size())
+                if (IsFractional())
+                {
+                    LogPrintf("%s: reserve currencies must define currency weight\n", __func__);
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                else if (conversionArr.isArray() && conversionArr.size() && conversionArr.size() != currencyArr.size())
                 {
                     LogPrintf("%s: non-reserve currencies must define all conversion rates for supported currencies if they define any\n", __func__);
                     nVersion = PBAAS_VERSION_INVALID;
@@ -521,13 +609,9 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
                     LogPrintf("%s: initial contributions for currencies must all be specified if any are specified\n", __func__);
                     nVersion = PBAAS_VERSION_INVALID;
                 }
-                else
-                {
-                    convertible = true;
-                }
             }
 
-            if (convertible && nVersion != PBAAS_VERSION_INVALID)
+            if (nVersion != PBAAS_VERSION_INVALID && IsFractional())
             {
                 if (minPreconvertArr.isArray() && minPreconvertArr.size() && minPreconvertArr.size() != currencyArr.size())
                 {
@@ -550,7 +634,6 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
             bool isPreconvertMin = minPreconvertArr.isArray() && minPreconvertArr.size();
             bool isPreconvertMax = maxPreconvertArr.isArray() && maxPreconvertArr.size();
             bool explicitConversions = conversionArr.isArray() && conversionArr.size();
-            bool havePreConversions = preConversionsArr.isArray() && preConversionsArr.size();
 
             if (IsFractional() && explicitConversions)
             {
@@ -572,7 +655,7 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
                     currencies.push_back(currencyID);
                 }
 
-                if (isInitialContributions)
+                if (isInitialContributions && i < initialContributionArr.size())
                 {
                     int64_t contrib = AmountFromValueNoErr(initialContributionArr[i]);
                     if (IsFractional() && contrib < MIN_RESERVE_CONTRIBUTION)
@@ -581,14 +664,8 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
                         nVersion = PBAAS_VERSION_INVALID;
                         break;
                     }
-                    contributions.push_back(contrib);
-                    preconverted.push_back(contrib);
-                }
-
-                if (havePreConversions && i < preConversionsArr.size())
-                {
-                    int64_t contrib = AmountFromValueNoErr(preConversionsArr[i]);
-                    preconverted.push_back(contrib);
+                    contributions[i] = contrib;
+                    preconverted[i] = contrib;
                 }
 
                 int64_t minPre = 0;
@@ -625,12 +702,14 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj)
                     }
                     conversions.push_back(conversion);
                 }
+                else
+                {
+                    conversions.push_back(0);
+                }
             }
         }
 
-        preAllocationRatio = AmountFromValueNoErr(find_value(obj, "preallocationratio"));
-
-        UniValue preallocationArr = find_value(obj, "preallocation");
+        UniValue preallocationArr = find_value(obj, "preallocations");
         if (preallocationArr.isArray())
         {
             for (int i = 0; i < preallocationArr.size(); i++)
@@ -698,44 +777,37 @@ int64_t CCurrencyDefinition::CalculateRatioOfValue(int64_t value, int64_t ratio)
 // this will only return an accurate result after total preconversion has been updated and before any emission
 int64_t CCurrencyDefinition::GetTotalPreallocation() const
 {
-    CAmount totalPreconvertedNative = 0;
     CAmount totalPreallocatedNative = 0;
-    if (preAllocationRatio == 0)
+    for (auto &onePreallocation : preAllocation)
     {
-        for (auto onePreallocation : preAllocation)
+        totalPreallocatedNative += onePreallocation.second;
+    }
+    return totalPreallocatedNative;
+}
+
+// this will only return an accurate result after total preconversion has been updated and before any emission
+int32_t CCurrencyDefinition::GetTotalCarveOut() const
+{
+    int32_t totalCarveOut = 0;
+    for (auto &oneCarveOut : preLaunchCarveOuts)
+    {
+        totalCarveOut += oneCarveOut.second;
+        if (oneCarveOut.second < 0 || oneCarveOut.second > SATOSHIDEN || totalCarveOut > SATOSHIDEN)
         {
-            totalPreallocatedNative += onePreallocation.second;
+            LogPrintf("%s: invalid carve out amount specified %d\n", __func__, oneCarveOut.second);
+            return 0;
         }
-        return totalPreallocatedNative;
     }
-    for (auto oneConversion : preconverted)
-    {
-        totalPreconvertedNative += oneConversion;
-    }
-    if (!totalPreconvertedNative || preAllocationRatio >= SATOSHIDEN)
-    {
-        return 0;
-    }
-    arith_uint256 bigAmount(totalPreconvertedNative);
-    static const arith_uint256 bigSatoshi(SATOSHIDEN);
-    arith_uint256 conversionPercent(preAllocationRatio);
-
-    CAmount newAmount = ((bigAmount * bigSatoshi) / (bigSatoshi - conversionPercent)).GetLow64();
-    CAmount retAmount = CalculateRatioOfValue(newAmount, preAllocationRatio);
-    newAmount = totalPreconvertedNative + retAmount;
-
-    retAmount = CalculateRatioOfValue(newAmount, preAllocationRatio); // again to account for minimum fee
-    retAmount += totalPreconvertedNative - (newAmount - retAmount);   // add any additional difference
-    return retAmount;
+    return totalCarveOut;
 }
 
 std::vector<std::pair<uint160, int64_t>> CCurrencyDefinition::GetPreAllocationAmounts() const
 {
-    if (!preAllocationRatio)
+    if (!preLaunchDiscount)
     {
         return preAllocation;
     }
-    if (preAllocationRatio >= SATOSHIDEN)
+    if (preLaunchDiscount >= SATOSHIDEN)
     {
         return std::vector<std::pair<uint160, int64_t>>();
     }

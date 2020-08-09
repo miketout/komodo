@@ -27,6 +27,21 @@ bool CVerusSolutionVector::GetPBaaSHeader(CPBaaSBlockHeader &pbh, uint32_t idx) 
     return false;
 }
 
+CPBaaSPreHeader::CPBaaSPreHeader(const CBlockHeader &bh)
+{
+    hashPrevBlock = bh.hashPrevBlock;
+    hashMerkleRoot = bh.hashMerkleRoot;
+    hashFinalSaplingRoot = bh.hashFinalSaplingRoot;
+    nNonce = bh.nNonce;
+    nBits = bh.nBits;
+    CPBaaSSolutionDescriptor descr = CConstVerusSolutionVector::GetDescriptor(bh.nSolution);
+    if (descr.version >= CConstVerusSolutionVector::activationHeight.ACTIVATE_PBAAS_HEADER)
+    {
+        hashPrevMMRRoot = descr.hashPrevMMRRoot;
+        hashBlockMMRRoot = descr.hashBlockMMRRoot;
+    }
+}
+
 void CPBaaSPreHeader::SetBlockData(CBlockHeader &bh)
 {
     bh.hashPrevBlock = hashPrevBlock;

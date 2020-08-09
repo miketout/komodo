@@ -404,17 +404,17 @@ CCurrencyValueMap CTransaction::GetReserveValueOut() const
 
         for (auto &oneCur : oneOut.valueMap)
         {
-            auto it = retVal.valueMap.find(oneCur.first);
-            if (it == retVal.valueMap.end())
+            auto reserveIt = retVal.valueMap.find(oneCur.first);
+            if (reserveIt == retVal.valueMap.end())
             {
                 retVal.valueMap[oneCur.first] = oneCur.second;
             }
             else
             {
-                it->second += oneCur.second;
-                if (it->second < 0)
+                reserveIt->second += oneCur.second;
+                if (reserveIt->second < 0)
                 {
-                    printf("CTransaction::GetReserveValueOut(): value overflow\n");
+                    printf("CTransaction::GetReserveValueOut(): currency value overflow total: %ld, adding: %ld\n", reserveIt->second, oneCur.second);
                     LogPrintf("CTransaction::GetReserveValueOut(): value overflow\n");
                     return std::map<uint160, CAmount>();
                 }

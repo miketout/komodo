@@ -439,7 +439,7 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
         arith_uint256 bigTotalFees(0);
         arith_uint256 totalChainStake(0);
         arith_uint256 bnStakeTarget;
-        int posCount = 0;
+        int posCount = 0, blockCount = 0;
 
         for (int i = first; i < height; i++)
         {
@@ -459,32 +459,31 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
 
             // if POS block, add stake
             uint256 posWinVal;
-            if (i > 100 && index.IsVerusPOSBlock())
+            if (i > 100)
             {
-                bnStakeTarget.SetCompact(index.GetVerusPOSTarget());
+                bnStakeTarget.SetCompact(lwmaGetNextPOSRequired(&index, consensus));
 
-                if (bnStakeTarget == 0)
+                if (bnStakeTarget != 0)
                 {
-                    totalChainStake = 0;
-                    avgBlockFees = false;
-                    LogPrintf("%s: failed to estimate staking supply\n", __func__);
-                    break;
+                    // We need to compute 2**256 / (bnTarget+1), but we can't represent 2**256
+                    // as it's too large for a arith_uint256. However, as 2**256 is at least as large
+                    // as bnTarget+1, it is equal to ((2**256 - bnTarget - 1) / (bnTarget+1)) + 1,
+                    // or ~bnTarget / (nTarget+1) + 1.
+                    totalChainStake = totalChainStake + (~bnStakeTarget / (bnStakeTarget + 1)) + 1;
+                    blockCount++;
+                    if (index.IsVerusPOSBlock())
+                    {
+                        posCount++;
+                    }
                 }
-
-                // We need to compute 2**256 / (bnTarget+1), but we can't represent 2**256
-                // as it's too large for a arith_uint256. However, as 2**256 is at least as large
-                // as bnTarget+1, it is equal to ((2**256 - bnTarget - 1) / (bnTarget+1)) + 1,
-                // or ~bnTarget / (nTarget+1) + 1.
-                totalChainStake = totalChainStake + (~bnStakeTarget / (bnStakeTarget + 1)) + 1;
-                posCount++;
             }
         }
 
         avgBlockFees = avgBlockFeesValid ? (bigTotalFees / arith_uint256(height - first)).GetLow64() : 0;
 
-        if (posCount > 5)
+        if (posCount > 0)
         {
-            totalChainStake = totalChainStake / arith_uint256(height - first);
+            totalChainStake = ((totalChainStake * arith_uint256(posCount)) / arith_uint256(blockCount * blockCount));
         }
 
         if (totalChainStake > arith_uint256(INT64_MAX))
@@ -1066,7 +1065,7 @@ UniValue estimatefee(const UniValue& params, bool fHelp)
             "\nResult:\n"
             "n :    (numeric) estimated fee-per-kilobyte\n"
             "\n"
-            "-1.0 is returned if not enough transactions and\n"
+            "minimum fee is returned if not enough transactions and\n"
             "blocks have been observed to make an estimate.\n"
             "\nExample:\n"
             + HelpExampleCli("estimatefee", "6")
@@ -1080,8 +1079,9 @@ UniValue estimatefee(const UniValue& params, bool fHelp)
 
     CFeeRate feeRate = mempool.estimateFee(nBlocks);
     if (feeRate == CFeeRate(0))
-        return -1.0;
-
+    {
+        feeRate = CFeeRate(DEFAULT_MIN_RELAY_TX_FEE);
+    }
     return ValueFromAmount(feeRate.GetFeePerK());
 }
 

@@ -13,8 +13,8 @@
 
 #include <univalue.h>
 #include "main.h"
+#include "txdb.h"
 #include "rpc/pbaasrpc.h"
-#include "pbaas/notarization.h"
 
 #include <assert.h>
 
@@ -27,8 +27,25 @@ extern string PBAAS_HOST;
 extern string PBAAS_USERPASS;
 extern int32_t PBAAS_PORT;
 
+CPBaaSNotarization::CPBaaSNotarization(const CScript &scriptPubKey) :
+                    nVersion(0),
+                    protocol(CCurrencyDefinition::NOTARIZATION_AUTO),
+                    notarizationHeight(0),
+                    prevHeight(0),
+                    crossHeight(0)
+{
+    COptCCParams p;
+    if (scriptPubKey.IsPayToCryptoCondition(p) && 
+        p.IsValid() &&
+        (p.evalCode == EVAL_ACCEPTEDNOTARIZATION || p.evalCode == EVAL_EARNEDNOTARIZATION) &&
+        p.vData.size())
+    {
+        ::FromVector(p.vData[0], *this);
+    }
+}
+
 CPBaaSNotarization::CPBaaSNotarization(const CTransaction &tx, int32_t *pOutIdx) :
-                    nVersion(CURRENT_VERSION),
+                    nVersion(0),
                     protocol(CCurrencyDefinition::NOTARIZATION_AUTO),
                     notarizationHeight(0),
                     prevHeight(0),
@@ -109,6 +126,57 @@ CPBaaSNotarization::CPBaaSNotarization(const UniValue &obj)
             nodes.push_back(CNodeData(uni_get_str(find_value(node, "networkaddress")), uni_get_str(find_value(node, "nodeidentity"))));
         }
     }
+}
+
+bool CPBaaSNotarization::GetLastNotarization(const uint160 &currencyID,
+                                             uint32_t eCode, 
+                                             int32_t startHeight,
+                                             int32_t endHeight,
+                                             uint256 *txIDOut,
+                                             CTransaction *txOut)
+{
+    CPBaaSNotarization notarization;
+    std::vector<CAddressIndexDbEntry> notarizationIndex;
+    // get the last unspent notarization for this currency, which is valid by definition for a token
+    if (GetAddressIndex(CCrossChainRPCData::GetConditionID(currencyID, eCode), 1, notarizationIndex, startHeight, endHeight))
+    {
+        // filter out all transactions that do not spend from the notarization thread, or originate as the
+        // chain definition
+        for (auto it = notarizationIndex.rbegin(); it != notarizationIndex.rend(); it++)
+        {
+            // first unspent notarization that is valid is the one we want, skip spending
+            if (it->first.spending)
+            {
+                continue;
+            }
+            LOCK(mempool.cs);
+            CTransaction oneTx;
+            uint256 blkHash;
+            if (myGetTransaction(it->first.txhash, oneTx, blkHash))
+            {
+                if ((notarization = CPBaaSNotarization(oneTx.vout[it->first.index].scriptPubKey)).IsValid())
+                {
+                    *this = notarization;
+                    if (txIDOut)
+                    {
+                        *txIDOut = it->first.txhash;
+                    }
+                    if (txOut)
+                    {
+                        *txOut = oneTx;
+                    }
+                    break;
+                }
+            }
+            else
+            {
+                LogPrintf("%s: error transaction %s not found, may need reindexing\n", __func__, it->first.txhash.GetHex().c_str());
+                printf("%s: error transaction %s not found, may need reindexing\n", __func__, it->first.txhash.GetHex().c_str());
+                continue;
+            }
+        }
+    }
+    return notarization.IsValid();
 }
 
 CTransactionFinalization::CTransactionFinalization(const CTransaction &tx, uint32_t *pEcode, int32_t *pFinalizationOutNum)

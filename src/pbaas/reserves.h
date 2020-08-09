@@ -100,7 +100,9 @@ public:
         FEE_OUTPUT = 8,                     // one per import, amount must match total percentage of fees for exporter, no pre-convert allowed
         SEND_BACK = 0x10,                   // fee is sent back immediately to destination on exporting chain
         MINT_CURRENCY = 0x20,               // set when this output is being minted on import
-        PREALLOCATE = 0x40                  // combined with minting for pre-allocation of currency
+        PREALLOCATE = 0x40,                 // combined with minting for pre-allocation of currency
+        BURN_CHANGE_PRICE = 0x80,           // set when this output is being minted on import
+        BURN_CHANGE_WEIGHT = 0x100          // set when this output is being minted on import
     };
 
     enum EConstants
@@ -343,7 +345,8 @@ public:
     enum FLAGS {
         FLAG_VALID = 1,
         FLAG_FRACTIONAL = 2,
-        FLAG_REFUNDING = 4
+        FLAG_REFUNDING = 4,
+        FLAG_PRELAUNCH = 8
     };
     enum CONSTANTS {
         MIN_RESERVE_RATIO = 1000000,        // we will not start a chain with less than 1% reserve ratio in any single currency
@@ -374,7 +377,13 @@ public:
                       CAmount Emitted, 
                       CAmount Supply, 
                       uint32_t Flags=FLAG_VALID) : 
-        flags(Flags), supply(Supply), initialSupply(InitialSupply), emitted(Emitted), weights(Weights), reserves(Reserves)
+        flags(Flags),
+        currencies(Currencies), 
+        weights(Weights), 
+        reserves(Reserves),
+        initialSupply(InitialSupply), 
+        emitted(Emitted),
+        supply(Supply)
     {}
 
     CCurrencyState(const std::vector<unsigned char> &asVector)
@@ -414,7 +423,7 @@ public:
     template<typename cpp_dec_float_type>
     static bool to_int64(const cpp_dec_float_type &input, int64_t &outval)
     {
-        std::stringstream ss(input.str(0));
+        std::stringstream ss(input.str(0, std::ios_base::fmtflags::_S_fixed));
         try
         {
             ss >> outval;
@@ -426,46 +435,15 @@ public:
         }
     }
 
-    CAmount PriceInReserve(int32_t reserveIndex=0) const
-    {
-        if (reserveIndex >= reserves.size())
-        {
-            return 0;
-        }
-        if (!IsFractional())
-        {
-            return reserves[reserveIndex];
-        }
-        if (supply == 0 || weights[reserveIndex] == 0)
-        {
-            return weights[reserveIndex];
-        }
-        arith_uint256 Supply(supply);
-
-        arith_uint256 Reserve(reserves[reserveIndex]);
-
-        arith_uint256 Ratio(weights[reserveIndex]);
-
-        arith_uint256 BigSatoshi(SATOSHIDEN);
-
-        return ((Reserve * arith_uint256(SATOSHIDEN) * arith_uint256(SATOSHIDEN)) / (Supply * Ratio)).GetLow64();
-    }
+    // in a fractional reserve with no reserve or supply, this will always return
+    // a price of the reciprocal (1/x) of the fractional reserve ratio of the indexed reserve,
+    // which will always be >= 1
+    CAmount PriceInReserve(int32_t reserveIndex=0, bool roundUp=false) const;
 
     // return the current price of the fractional reserve in the reserve currency in Satoshis
-    cpp_dec_float_50 GetPriceInReserve(int32_t reserveIndex=0) const
-    {
-        return cpp_dec_float_50(PriceInReserve(reserveIndex));
-    }
+    cpp_dec_float_50 PriceInReserveDecFloat50(int32_t reserveIndex=0) const;
 
-    std::vector<CAmount> PricesInReserve() const
-    {
-        std::vector<CAmount> retVal(currencies.size());
-        for (int i = 0; i < currencies.size(); i++)
-        {
-            retVal[i] = PriceInReserve(i);
-        }
-        return retVal;
-    }
+    std::vector<CAmount> PricesInReserve() const;
 
     // This considers one currency at a time
     CAmount ConvertAmounts(CAmount inputReserve, CAmount inputFractional, CCurrencyState &newState, int32_t reserveIndex=0) const;
@@ -478,46 +456,21 @@ public:
     CAmount CalculateConversionFee(CAmount inputAmount, bool convertToNative = false, int32_t reserveIndex=0) const;
     CAmount ReserveFeeToNative(CAmount inputAmount, CAmount outputAmount, int32_t reserveIndex=0) const;
 
-    CAmount ReserveToNative(CAmount reserveAmount, int32_t reserveIndex) const
-    {
-        static arith_uint256 bigSatoshi(SATOSHIDEN);
-        arith_uint256 bigAmount(reserveAmount);
+    CAmount ReserveToNative(CAmount reserveAmount, int32_t reserveIndex) const;
+    CAmount ReserveToNative(const CCurrencyValueMap &reserveAmounts) const;
 
-        int64_t price = PriceInReserve(reserveIndex);
-        bigAmount = price ? (bigAmount * bigSatoshi) / arith_uint256(price) : 0;
-
-        return bigAmount.GetLow64();
-    }
-
-    CAmount ReserveToNative(const CCurrencyValueMap &reserveAmounts) const
-    {
-        CAmount nativeOut = 0;
-        for (int i = 0; i < currencies.size(); i++)
-        {
-            auto it = reserveAmounts.valueMap.find(currencies[i]);
-            if (it != reserveAmounts.valueMap.end())
-            {
-                nativeOut += ReserveToNative(it->second, i);
-            }
-        }
-        return nativeOut;
-    }
-
-    CAmount ReserveToNativeRaw(const CCurrencyValueMap &reserveAmounts, const std::vector<CAmount> &exchangeRates) const;
+    static CAmount ReserveToNativeRaw(CAmount reserveAmount, const cpp_dec_float_50 &exchangeRate);
     static CAmount ReserveToNativeRaw(CAmount reserveAmount, CAmount exchangeRate);
     static CAmount ReserveToNativeRaw(const CCurrencyValueMap &reserveAmounts, const std::vector<uint160> &currencies, const std::vector<CAmount> &exchangeRates);
-
-    CAmount NativeToReserve(CAmount nativeAmount, int32_t reserveIndex=0) const
-    {
-        static arith_uint256 bigSatoshi(SATOSHIDEN);
-        arith_uint256 bigAmount(nativeAmount);
-        arith_uint256 price = arith_uint256(PriceInReserve());
-        return ((bigAmount * arith_uint256(price)) / bigSatoshi).GetLow64();
-    }
+    static CAmount ReserveToNativeRaw(const CCurrencyValueMap &reserveAmounts, const std::vector<uint160> &currencies, const std::vector<cpp_dec_float_50> &exchangeRates);
+    CAmount ReserveToNativeRaw(const CCurrencyValueMap &reserveAmounts, const std::vector<CAmount> &exchangeRates) const;
 
     const CCurrencyValueMap &NativeToReserve(std::vector<CAmount> nativeAmount, int32_t reserveIndex=0) const;
+    CAmount NativeToReserve(CAmount nativeAmount, int32_t reserveIndex=0) const;
+    static CAmount NativeToReserveRaw(CAmount nativeAmount, const cpp_dec_float_50 &exchangeRate);
     static CAmount NativeToReserveRaw(CAmount nativeAmount, CAmount exchangeRate);
     CCurrencyValueMap NativeToReserveRaw(const std::vector<CAmount> &, const std::vector<CAmount> &exchangeRates) const;
+    CCurrencyValueMap NativeToReserveRaw(const std::vector<CAmount> &, const std::vector<cpp_dec_float_50> &exchangeRates) const;
 
     UniValue ToUniValue() const;
 
@@ -534,6 +487,23 @@ public:
     bool IsRefunding() const
     {
         return flags & FLAG_REFUNDING;
+    }
+
+    bool IsPrelaunch() const
+    {
+        return flags & FLAG_PRELAUNCH;
+    }
+
+    void SetPrelaunch(bool newState=true)
+    {
+        if (newState)
+        {
+            flags |= FLAG_PRELAUNCH;
+        }
+        else
+        {
+            flags &= ~FLAG_PRELAUNCH;
+        }
     }
 
     void SetRefunding(bool newState=true)
@@ -630,6 +600,7 @@ public:
 
     void ClearForNextBlock()
     {
+        emitted = 0;
         nativeFees = 0;
         nativeConversionFees = 0;
         reserveIn = std::vector<CAmount>(currencies.size());
@@ -756,9 +727,19 @@ public:
     static CAmount CalculateConversionFee(CAmount inputAmount);
     static CAmount CalculateAdditionalConversionFee(CAmount inputAmount);
 
+    CAmount TotalNativeOutConverted() const
+    {
+        CAmount nativeOutConverted = 0;
+        for (auto &one : currencies)
+        {
+            nativeOutConverted += one.second.nativeOutConverted;
+        }
+        return nativeOutConverted;
+    }
+
     CAmount NativeFees() const
     {
-        return nativeIn - nativeOut;                                // native out converted does not include conversion
+        return nativeIn - nativeOut;     // native out converted does not include conversion
     }
 
     CCurrencyValueMap ReserveFees() const
@@ -766,7 +747,7 @@ public:
         CCurrencyValueMap retFees;
         for (auto &one : currencies)
         {
-            CAmount oneFee = one.second.reserveIn - one.second.reserveOut;
+            CAmount oneFee = one.second.reserveIn - (one.second.reserveOut - one.second.reserveOutConverted);
             if (oneFee)
             {
                 retFees.valueMap[one.first] = oneFee;

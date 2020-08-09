@@ -129,6 +129,11 @@ public:
         return UintToArith256(power) >> 128;
     }
 
+    static HASHALGOWRITER GetHashWriter()
+    {
+        return HASHALGOWRITER(SER_GETHASH, 0);
+    }
+
     // add a right to this left and create a parent node
     CMMRPowerNode CreateParentNode(const CMMRPowerNode nRight) const
     {

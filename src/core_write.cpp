@@ -260,6 +260,208 @@ UniValue CCurrencyState::ToUniValue() const
     return ret;
 }
 
+CAmount CCurrencyState::PriceInReserve(int32_t reserveIndex, bool roundUp) const
+{
+    if (reserveIndex >= reserves.size())
+    {
+        return 0;
+    }
+    if (!IsFractional())
+    {
+        return reserves[reserveIndex];
+    }
+    if (!supply || weights[reserveIndex] == 0)
+    {
+        return weights[reserveIndex];
+    }
+    arith_uint256 Supply(supply);
+    arith_uint256 Reserve(reserves[reserveIndex] ? reserves[reserveIndex] : SATOSHIDEN);
+    arith_uint256 Ratio(weights[reserveIndex]);
+    static arith_uint256 bigZero(0);
+    static arith_uint256 BigSatoshi(SATOSHIDEN);
+    static arith_uint256 BigSatoshiSquared = BigSatoshi * BigSatoshi;
+
+    if (roundUp)
+    {
+        arith_uint256 denominator = Supply * Ratio;
+        arith_uint256 numerator = Reserve * BigSatoshiSquared;
+        arith_uint256 bigAnswer = numerator / denominator;
+        int64_t remainder = (numerator - (bigAnswer * denominator)).GetLow64();
+        CAmount answer = bigAnswer.GetLow64();
+        if (remainder && (answer + 1) > 0)
+        {
+            answer++;
+        }
+        return answer;
+    }
+    else
+    {
+        return ((Reserve * BigSatoshiSquared) / (Supply * Ratio)).GetLow64();
+    }
+}
+
+cpp_dec_float_50 CCurrencyState::PriceInReserveDecFloat50(int32_t reserveIndex) const
+{
+    static cpp_dec_float_50 BigSatoshiSquared("10000000000000000");
+    static cpp_dec_float_50 BigZero("0");
+    if (reserveIndex >= reserves.size())
+    {
+        return BigZero;
+    }
+    if (!IsFractional())
+    {
+        return cpp_dec_float_50(std::to_string(reserves[reserveIndex]));
+    }
+    if (!supply || weights[reserveIndex] == 0)
+    {
+        return cpp_dec_float_50(std::to_string(weights[reserveIndex]));
+    }
+    cpp_dec_float_50 Supply(std::to_string((supply ? supply : 1)));
+    cpp_dec_float_50 Reserve(std::to_string(reserves[reserveIndex] ? reserves[reserveIndex] : SATOSHIDEN));
+    cpp_dec_float_50 Ratio(std::to_string(weights[reserveIndex]));
+    return (Reserve * BigSatoshiSquared) / (Supply * Ratio);
+}
+
+std::vector<CAmount> CCurrencyState::PricesInReserve() const
+{
+    std::vector<CAmount> retVal(currencies.size());
+    for (int i = 0; i < currencies.size(); i++)
+    {
+        retVal[i] = PriceInReserve(i);
+    }
+    return retVal;
+}
+
+CAmount CCurrencyState::ReserveToNativeRaw(CAmount reserveAmount, const cpp_dec_float_50 &price)
+{
+    static cpp_dec_float_50 bigSatoshi(std::to_string(SATOSHIDEN));
+    static cpp_dec_float_50 bigZero(std::to_string(0));
+    cpp_dec_float_50 bigAmount(std::to_string(reserveAmount));
+
+    bigAmount = price != bigZero ? (bigAmount * bigSatoshi) / price : bigZero;
+    int64_t retVal;
+    if (to_int64(bigAmount, retVal))
+    {
+        return retVal;
+    }
+    return 0;
+}
+
+CAmount CCurrencyState::ReserveToNativeRaw(CAmount reserveAmount, CAmount exchangeRate)
+{
+    return ReserveToNativeRaw(reserveAmount, cpp_dec_float_50(std::to_string(exchangeRate)));
+}
+
+CAmount CCurrencyState::ReserveToNativeRaw(const CCurrencyValueMap &reserveAmounts, const std::vector<CAmount> &exchangeRates) const
+{
+    CAmount nativeOut = 0;
+    for (int i = 0; i < currencies.size(); i++)
+    {
+        auto it = reserveAmounts.valueMap.find(currencies[i]);
+        if (it != reserveAmounts.valueMap.end())
+        {
+            nativeOut += ReserveToNativeRaw(it->second, exchangeRates[i]);
+        }
+    }
+    return nativeOut;
+}
+
+CAmount CCurrencyState::ReserveToNativeRaw(const CCurrencyValueMap &reserveAmounts, 
+                                              const std::vector<uint160> &currencies, 
+                                              const std::vector<cpp_dec_float_50> &exchangeRates)
+{
+    CAmount nativeOut = 0;
+    for (int i = 0; i < currencies.size(); i++)
+    {
+        auto it = reserveAmounts.valueMap.find(currencies[i]);
+        if (it != reserveAmounts.valueMap.end())
+        {
+            nativeOut += ReserveToNativeRaw(it->second, exchangeRates[i]);
+        }
+    }
+    return nativeOut;
+}
+
+CAmount CCurrencyState::ReserveToNativeRaw(const CCurrencyValueMap &reserveAmounts, 
+                                              const std::vector<uint160> &currencies, 
+                                              const std::vector<CAmount> &exchangeRates)
+{
+    CAmount nativeOut = 0;
+    for (int i = 0; i < currencies.size(); i++)
+    {
+        auto it = reserveAmounts.valueMap.find(currencies[i]);
+        if (it != reserveAmounts.valueMap.end())
+        {
+            nativeOut += ReserveToNativeRaw(it->second, exchangeRates[i]);
+        }
+    }
+    return nativeOut;
+}
+
+CAmount CCurrencyState::ReserveToNative(CAmount reserveAmount, int32_t reserveIndex) const
+{
+    return ReserveToNativeRaw(reserveAmount, PriceInReserveDecFloat50(reserveIndex));
+}
+
+CAmount CCurrencyState::NativeToReserveRaw(CAmount nativeAmount, const cpp_dec_float_50 &price)
+{
+    static cpp_dec_float_50 bigSatoshi(std::to_string((SATOSHIDEN)));
+    cpp_dec_float_50 bigAmount(std::to_string(nativeAmount));
+    int64_t retVal;
+    cpp_dec_float_50 bigReserves = (bigAmount * price) / bigSatoshi;
+    if (to_int64(bigReserves, retVal))
+    {
+        return retVal;
+    }
+    return 0;
+}
+
+CAmount CCurrencyState::NativeToReserveRaw(CAmount nativeAmount, CAmount exchangeRate)
+{
+    return NativeToReserveRaw(nativeAmount, cpp_dec_float_50(std::to_string(exchangeRate)));
+}
+
+CAmount CCurrencyState::NativeToReserve(CAmount nativeAmount, int32_t reserveIndex) const
+{
+    return NativeToReserveRaw(nativeAmount, PriceInReserveDecFloat50(reserveIndex));
+}
+
+CCurrencyValueMap CCurrencyState::NativeToReserveRaw(const std::vector<CAmount> &nativeAmount, const std::vector<CAmount> &exchangeRates) const
+{
+    static arith_uint256 bigSatoshi(SATOSHIDEN);
+    CCurrencyValueMap retVal;
+    for (int i = 0; i < currencies.size(); i++)
+    {
+        retVal.valueMap[currencies[i]] =  NativeToReserveRaw(nativeAmount[i], exchangeRates[i]);
+    }
+    return retVal;
+}
+
+CCurrencyValueMap CCurrencyState::NativeToReserveRaw(const std::vector<CAmount> &nativeAmount, const std::vector<cpp_dec_float_50> &exchangeRates) const
+{
+    static arith_uint256 bigSatoshi(SATOSHIDEN);
+    CCurrencyValueMap retVal;
+    for (int i = 0; i < currencies.size(); i++)
+    {
+        retVal.valueMap[currencies[i]] =  NativeToReserveRaw(nativeAmount[i], exchangeRates[i]);
+    }
+    return retVal;
+}
+
+CAmount CCurrencyState::ReserveToNative(const CCurrencyValueMap &reserveAmounts) const
+{
+    CAmount nativeOut = 0;
+    for (int i = 0; i < currencies.size(); i++)
+    {
+        auto it = reserveAmounts.valueMap.find(currencies[i]);
+        if (it != reserveAmounts.valueMap.end())
+        {
+            nativeOut += ReserveToNative(it->second, i);
+        }
+    }
+    return nativeOut;
+}
+
 template <typename INNERVECTOR>
 UniValue ValueVectorsToUniValue(const std::vector<std::string> &rowNames,
                                 const std::vector<std::string> &columnNames,
@@ -423,9 +625,9 @@ UniValue CCurrencyDefinition::ToUniValue() const
         obj.push_back(Pair("maxpreconversion", maxPreconvertArr));
     }
 
-    if (preAllocationRatio)
+    if (preLaunchDiscount)
     {
-        obj.push_back(Pair("preallocationratio", ValueFromAmount(preAllocationRatio)));
+        obj.push_back(Pair("prelaunchdiscount", ValueFromAmount(preLaunchDiscount)));
     }
 
     if (preAllocation.size())

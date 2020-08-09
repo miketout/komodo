@@ -112,7 +112,6 @@ UniValue getinfo(const UniValue& params, bool fHelp)
     UniValue obj(UniValue::VOBJ);
     obj.push_back(Pair("version", CLIENT_VERSION));
     obj.push_back(Pair("protocolversion", PROTOCOL_VERSION));
-    obj.push_back(Pair("KMDversion", KOMODO_VERSION));
     obj.push_back(Pair("VRSCversion", VERUS_VERSION));
     obj.push_back(Pair("notarized", notarized_height));
     obj.push_back(Pair("prevMoMheight", prevMoMheight));
@@ -706,7 +705,7 @@ UniValue hashdata(const UniValue& params, bool fHelp)
             "\nReturns the hash of the data in a hex message\n"
             "\nArguments:\n"
             "  \"hexdata\"            (string, required) This message is converted from hex, the data is hashed, then returned\n"
-            "  \"hashtype\"           (string, optional) one of (\"sha256rev\", \"sha256D\", \"verushash2\", \"verushash2b\", \"verushash2.1\"), defaults to sha256\n"
+            "  \"hashtype\"           (string, optional) one of (\"sha256rev\", \"sha256D\", \"blake2b\", \"verushash2\", \"verushash2b\", \"verushash2.1\"), defaults to sha256\n"
             "\nResult:\n"
             "  \"hashresult\"         (hexstring) 32 byte has in hex of the data passed in using the hash of the specific blockheight\n"
             "\nExamples:\n"
@@ -750,6 +749,12 @@ UniValue hashdata(const UniValue& params, bool fHelp)
     else if (hashType == "sha256D")
     {
         CHashWriter hw(SER_GETHASH, PROTOCOL_VERSION);
+        hw.write((const char *)vmsg.data(), vmsg.size());
+        result = hw.GetHash();
+    }
+    else if (hashType == "blake2b")
+    {
+        CBLAKE2bWriter hw(SER_GETHASH, PROTOCOL_VERSION);
         hw.write((const char *)vmsg.data(), vmsg.size());
         result = hw.GetHash();
     }

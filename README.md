@@ -1,4 +1,4 @@
-## VerusCoin version 0.7.0-1
+## VerusCoin version 0.7.0-4
 
 Arguably the world's most advanced technology, zero knowledge privacy-centric blockchain, Verus Coin brings Sapling performance and zero knowledge features to an intelligent system with interchain smart contracts and a completely original, combined proof of stake/proof of work consensus algorithm that solves the nothing at stake problem. With this and its approach towards CPU mining and ASICs, Verus Coin strives to be one of the most naturally decentralizing and attack resistant blockchains in existence.
 
@@ -13,32 +13,12 @@ The wallet downloads and stores the block chain or asset chain of the coin you s
 
 ## Development Resources
 - VerusCoin:[https://veruscoin.io/](https://veruscoin.io/) Wallets and CLI tools
-- Komodo Web: [https://komodoplatform.com/](https://komodoplatform.com/)
-- Organization web: [https://komodoplatform.com/](https://komodoplatform.com/)
-- Forum: [https://forum.komodoplatform.com/](https://forum.komodoplatform.com/)
-- Mail: [info@komodoplatform.com](mailto:info@komodoplatform.com)
-- Support: [https://support.komodoplatform.com/support/home](https://support.komodoplatform.com/support/home)
-- Knowledgebase & How-to: [https://komodoplatform.atlassian.net/wiki/spaces/KPSD/pages](https://komodoplatform.atlassian.net/wiki/spaces/KPSD/pages)
-- API references: [http://docs.komodoplatform.com/](http://docs.komodoplatform.com/)
-- Blog: [http://blog.komodoplatform.com/](http://blog.komodoplatform.com/)
-- Whitepaper: [Komodo Whitepaper](https://komodoplatform.com/wp-content/uploads/2018/03/2018-03-12-Komodo-White-Paper-Full.pdf)
-- Komodo Platform public material: [Komodo Platform public material](https://docs.google.com/document/d/1AbhWrtagu4vYdkl-vsWz-HSNyNvK-W-ZasHCqe7CZy0)
-
-## List of Komodo Platform Technologies
-
-- Delayed Proof of Work (dPoW) - Additional security layer and Komodos own consensus algorithm.
-- zk-SNARKs - Komodo Platform's privacy technology for shielded transactions
-- Tokens/Assets Technology - create "colored coins" on the Komodo Platform and use them as a layer for securites
-- Reward API - Komodo CC technology for securities
-- CC - Crypto Conditions to realize "smart contract" logic on top of the Komodo Platform
-- Jumblr - Decentralized tumbler for KMD and other cryptocurrencies
-- Assetchains - Create your own Blockchain that inherits all Komodo Platform functionalities and blockchain interoperability
-- Pegged Assets - Chains that maintain a peg to fiat currencies
-- Peerchains - Scalability solution where sibling chains form a network of blockchains
-- More in depth covered [here](https://docs.google.com/document/d/1AbhWrtagu4vYdkl-vsWz-HSNyNvK-W-ZasHCqe7CZy0)
-- Also note you receive 5% APR on your holdings.
-[See this article for more details](https://komodoplatform.atlassian.net/wiki/spaces/KPSD/pages/20480015/Claim+KMD+Interest+in+Agama)
-
+- Discord: [https://discord.gg/VRKMP2S](https://discord.gg/VRKMP2S)
+- Mail: [development@veruscoin.io](development@veruscoin.io)
+- FAQs & How-to: [https://wiki.veruscoin.io/#!index.md](https://wiki.veruscoin.io/#!index.mdhttps://komodoplatform.atlassian.net/wiki/spaces/KPSD/pages)
+- API references: [https://wiki.veruscoin.io/#!faq-cli/clifaq-02_verus_commands.md](https://wiki.veruscoin.io/#!faq-cli/clifaq-02_verus_commands.md)
+- Medium: [https://medium.com/@veruscoin](https://medium.com/@veruscoin)
+- Explorer: [https://explorer.veruscoin.io/](https://explorer.veruscoin.io/)
 ## Tech Specification
 - Launch Date May 21, 2018
 - Max Supply: 83,540,184 VRSC
@@ -47,8 +27,8 @@ The wallet downloads and stores the block chain or asset chain of the coin you s
 - Mining Algorithm: VerusHash 2.0
 - Consensus 50% PoW, 50% PoS
 - Transaction Fee 0.0001
-- Privacy: Zcash Sprout
-- Komodo Platform with dPOW
+- Privacy: Zcash Sapling
+- dPOW on Komodo blockchain
 - CheatCatcher distributed stake cheating detector
 
 ## About this Project
@@ -128,22 +108,21 @@ cd VerusCoin
 HOST= aarch64-linux-gnu ./zcutil/build.sh -j8
 #This can take some time.
 ```
-**The VerusCoin project and protocol is experimental and a work-in-progress.** Use this source code and software at your own risk.
 
 #To view all commands
 ./src/verus help
 
-#To view komodod output:
-tail -f ~/.komodo/debug.log
-#To view VRSC output:
+#To view verusd debug output:
+```
 tail -f ~/.komodo/VRSC/debug.log
+```
 Note that this directory is correct for Linux, not Mac or Windows. Coin info for Verus is stored in ~/.komodo/VRSC under Ubuntu/Linux.
 
 For Windows coin info for Verus is stored under \Users<username>\AppData\Roaming\Komodo\VRSC
 
 For Mac coin info for Verus is stored under ~/Library/Application\ Support/Komodo/VRSC
 
-**Zcash is unfinished and highly experimental.** Use at your own risk.
+**The VerusCoin project and protocol is experimental and a work-in-progress.** Use this source code and software at your own risk.
 
 Always back your wallets up carefully and securely, **especially before attempting the following process**
 

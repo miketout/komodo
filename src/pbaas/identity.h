@@ -585,6 +585,16 @@ public:
     {
         return "{\"id\":" + idID.GetHex() + ", \"blockheight\":" + std::to_string(blockHeight) + ", \"blockorder\":" + std::to_string(blockOrder) + ", \"flags\":" + std::to_string(flags) + ", \"mapkey\":" + ArithToUint256(MapKey()).GetHex() + "}";
     }
+
+    bool CanSign() const
+    {
+        return flags & CAN_SIGN;
+    }
+
+    bool CanSpend() const
+    {
+        return flags & CAN_SPEND;
+    }
 };
 
 class CIdentityMapValue : public CIdentity

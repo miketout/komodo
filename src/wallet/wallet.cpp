@@ -1997,9 +1997,16 @@ int32_t CWallet::VerusStakeTransaction(CBlock *pBlock, CMutableTransaction &txNe
         if (extendedStake)
         {
             CTxDestination dest;
-            if (VERUS_DEFAULTID.IsNull())
+            if (VERUS_DEFAULTID.IsNull() || USE_EXTERNAL_PUBKEY)
             {
-                ExtractDestination(txNew.vout[0].scriptPubKey, dest, true);
+                if (USE_EXTERNAL_PUBKEY)
+                {
+                    dest = CPubKey(ParseHex(NOTARY_PUBKEY));
+                }
+                else
+                {
+                    ExtractDestination(txNew.vout[0].scriptPubKey, dest, true);
+                }
             }
             else
             {
@@ -3476,8 +3483,19 @@ isminetype CWallet::IsMine(const CTransaction& tx, uint32_t voutNum)
 
 bool CWallet::IsFromMe(const CTransaction& tx) const
 {
-    if (GetDebit(tx, ISMINE_ALL) > 0) {
-        return true;
+    {
+        LOCK(cs_wallet);
+        for (auto &txin : tx.vin)
+        {
+            map<uint256, CWalletTx>::const_iterator mi = mapWallet.find(txin.prevout.hash);
+            if (mi != mapWallet.end())
+            {
+                const CWalletTx& prev = (*mi).second;
+                if (txin.prevout.n < prev.vout.size())
+                    if (::IsMine(*this, prev.vout[txin.prevout.n].scriptPubKey) & ISMINE_ALL)
+                        return true;
+            }
+        }
     }
     for (const JSDescription& jsdesc : tx.vJoinSplit) {
         for (const uint256& nullifier : jsdesc.nullifiers) {
@@ -5957,7 +5975,7 @@ bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend, CWalletTx& wt
 // tokens/reserve currencies, not the native currency of this chain, represented as reserve outputs for both input and output.
 // That means that all outputs must be reserve consuming outputs. Fee is added or converted from reserves if this is a
 // fractional reserve chain. Fees are calculated based on the current reserve conversion price.
-bool CWallet::CreateReserveTransaction(const vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet,
+int CWallet::CreateReserveTransaction(const vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet,
                                        int& nChangePosRet, int &nChangeOutputs, std::string& strFailReason, const CCoinControl* coinControl, 
                                        const CTxDestination *pOnlyFromDest, bool sign)
 {
@@ -5985,7 +6003,7 @@ bool CWallet::CreateReserveTransaction(const vector<CRecipient>& vecSend, CWalle
     if (vecSend.empty())
     {
         strFailReason = _("Transaction must have outputs");
-        return false;
+        return RPC_INVALID_PARAMETER;
     }
 
     CCurrencyDefinition newCurrency;
@@ -5999,7 +6017,7 @@ bool CWallet::CreateReserveTransaction(const vector<CRecipient>& vecSend, CWalle
             if (newCurrency.IsValid())
             {
                 strFailReason = _("A normal transaction cannot define define multiple currencies");
-                return false;
+                return RPC_INVALID_PARAMETER;
             }
             newCurrency = CCurrencyDefinition(p.vData[0]);
         }
@@ -6009,12 +6027,12 @@ bool CWallet::CreateReserveTransaction(const vector<CRecipient>& vecSend, CWalle
         if (!values.IsValid())
         {
             strFailReason = _("Output cannot have NULL currency type");
-            return false;
+            return RPC_INVALID_PARAMETER;
         }
         if (values.HasNegative())
         {
             strFailReason = _("Transaction output amounts must not be negative");
-            return false;
+            return RPC_INVALID_PARAMETER;
         }
 
         totalNativeOutput += recipient.nAmount;
@@ -6029,14 +6047,14 @@ bool CWallet::CreateReserveTransaction(const vector<CRecipient>& vecSend, CWalle
         else if (recipient.fSubtractFeeFromAmount)
         {
             strFailReason = _("Cannot specify to subtract fee from amount on non-native, non-reserve currency outputs");
-            return false;
+            return RPC_INVALID_PARAMETER;
         }
 
         // make sure we have no negative totals. we do not move this outside the loop, so we can check against overflow on every iteration
         if (totalReserveOutput.HasNegative())
         {
             strFailReason = _("Transaction amounts must not be negative");
-            return false;
+            return RPC_INVALID_PARAMETER;
         }
     }
 
@@ -6060,8 +6078,8 @@ bool CWallet::CreateReserveTransaction(const vector<CRecipient>& vecSend, CWalle
     // Activates after Overwinter network upgrade
     if (Params().GetConsensus().NetworkUpgradeActive(nextBlockHeight, Consensus::UPGRADE_OVERWINTER)) {
         if (txNew.nExpiryHeight >= TX_EXPIRY_HEIGHT_THRESHOLD){
-            strFailReason = _("nExpiryHeight must be less than TX_EXPIRY_HEIGHT_THRESHOLD.");
-            return false;
+            strFailReason = "nExpiryHeight must be less than" + std::to_string((uint32_t)TX_EXPIRY_HEIGHT_THRESHOLD);
+            return RPC_INVALID_PARAMETER;
         }
     }
 
@@ -6093,469 +6111,468 @@ bool CWallet::CreateReserveTransaction(const vector<CRecipient>& vecSend, CWalle
     assert(txNew.nLockTime < LOCKTIME_THRESHOLD);
 
     CCurrencyValueMap exchangeRates;
-    auto currencyState = ConnectedChains.GetCurrencyState(nextBlockHeight - 1);
-    for (int i = 0; i < currencyState.currencies.size(); i++)
-    {
-        exchangeRates.valueMap[currencyState.currencies[i]] = currencyState.PriceInReserve(i);
-    }
-
     {
         LOCK2(cs_main, cs_wallet);
+
+        auto currencyState = ConnectedChains.GetCurrencyState(nextBlockHeight - 1);
+        for (int i = 0; i < currencyState.currencies.size(); i++)
         {
-            nFeeRet = 5000;
-            while (true)
+            exchangeRates.valueMap[currencyState.currencies[i]] = currencyState.PriceInReserve(i);
+        }
+
+        nFeeRet = 5000;
+        while (true)
+        {
+            //interest = 0;
+            txNew.vin.clear();
+            txNew.vout.clear();
+            wtxNew.fFromMe = true;
+            nChangePosRet = -1;
+            nChangeOutputs = 0;
+            bool fFirst = true;
+
+            // dust threshold of reserve may be different than native coin, if so, convert
+            CAmount dustThreshold;
+
+            CAmount nTotalNativeValue = totalNativeOutput;
+            CCurrencyValueMap totalReserveValue = totalReserveOutput;
+
+            if (nSubtractFeeFromAmount == 0)
+                nTotalNativeValue += nFeeRet;
+
+            double dPriority = 0;
+            // vouts to the payees
+            BOOST_FOREACH (const CRecipient& recipient, vecSend)
             {
-                //interest = 0;
-                txNew.vin.clear();
-                txNew.vout.clear();
-                wtxNew.fFromMe = true;
-                nChangePosRet = -1;
-                nChangeOutputs = 0;
-                bool fFirst = true;
+                // native output value for a reserve output is generally 0. fees are paid by converting from
+                // reserve token and the difference between input and output in reserve is the fee
+                // the actual reserve token output value is in the scriptPubKey
+                CTxOut txout(recipient.nAmount, recipient.scriptPubKey);
+                CAmount nativeEquivalent = txout.nValue;
 
-                // dust threshold of reserve may be different than native coin, if so, convert
-                CAmount dustThreshold;
-
-                CAmount nTotalNativeValue = totalNativeOutput;
-                CCurrencyValueMap totalReserveValue = totalReserveOutput;
-
-                if (nSubtractFeeFromAmount == 0)
-                    nTotalNativeValue += nFeeRet;
-
-                double dPriority = 0;
-                // vouts to the payees
-                BOOST_FOREACH (const CRecipient& recipient, vecSend)
+                // here, if we know that it isn't an opret, it will have an output that expects input
+                if (!recipient.scriptPubKey.IsOpReturn())
                 {
-                    // native output value for a reserve output is generally 0. fees are paid by converting from
-                    // reserve token and the difference between input and output in reserve is the fee
-                    // the actual reserve token output value is in the scriptPubKey
-                    CTxOut txout(recipient.nAmount, recipient.scriptPubKey);
-                    CAmount nativeEquivalent = txout.nValue;
+                    COptCCParams p;
+                    CCurrencyValueMap reserveOutput = recipient.scriptPubKey.ReserveOutValue(p);
+                    CCurrencyValueMap relevantReserves;
 
-                    // here, if we know that it isn't an opret, it will have an output that expects input
-                    if (!recipient.scriptPubKey.IsOpReturn())
+                    if (recipient.fSubtractFeeFromAmount)
                     {
-                        COptCCParams p;
-                        CCurrencyValueMap reserveOutput = recipient.scriptPubKey.ReserveOutValue(p);
-                        CCurrencyValueMap relevantReserves;
+                        CAmount subFee = nFeeRet / nSubtractFeeFromAmount; // Subtract fee equally from each selected recipient
 
-                        if (recipient.fSubtractFeeFromAmount)
+                        if (fFirst) // first receiver pays the remainder not divisible by output count
                         {
-                            CAmount subFee = nFeeRet / nSubtractFeeFromAmount; // Subtract fee equally from each selected recipient
-
-                            if (fFirst) // first receiver pays the remainder not divisible by output count
-                            {
-                                fFirst = false;
-                                subFee += nFeeRet % nSubtractFeeFromAmount;
-                            }
-
-                            if (subFee <= txout.nValue)
-                            {
-                                txout.nValue -= subFee;
-                            }
-                            else if ((relevantReserves = reserveOutput.IntersectingValues(reserveCurrencies)).valueMap.size())
-                            {
-                                // if we will subtract from more than one currency, divide fee among them equally
-                                CAmount subSubFee = subFee / relevantReserves.valueMap.size();
-                                CAmount extraFee = subFee % relevantReserves.valueMap.size();
-                                // TODO: this does not support multi-currency, since the outputs do not. it will need
-                                // to be checked when we enable multi-currency outputs
-                                for (auto &oneCur : relevantReserves.valueMap)
-                                {
-                                    auto it = exchangeRates.valueMap.find(oneCur.first);
-                                    assert(it != exchangeRates.valueMap.end());
-                                    reserveOutput.valueMap[it->first] -= currencyState.NativeToReserveRaw(subFee + (extraFee ? 1 : 0), it->second);
-                                    if (extraFee)
-                                    {
-                                        extraFee--;
-                                    }
-                                }
-                                txout.scriptPubKey.SetReserveOutValue(reserveOutput);
-                            }
-                            else
-                            {
-                                // asking to pay a fee on an output, but not being able to is not accepted, should
-                                // never get here, as it should have been checked above
-                                strFailReason = _("UNEXPECTED ERROR: Cannot subtract fee from amount on non-native, non-reserve currency outputs");
-                                return false;
-                            }
+                            fFirst = false;
+                            subFee += nFeeRet % nSubtractFeeFromAmount;
                         }
 
-                        dustThreshold = txout.GetDustThreshold(::minRelayTxFee);
-
-                        // only non-crypto condition, and normal reserve outputs are subject to dust limitations
-                        if (!p.IsValid() || 
-                            p.evalCode == EVAL_RESERVE_OUTPUT || 
-                            p.evalCode == EVAL_RESERVE_DEPOSIT || 
-                            p.evalCode == EVAL_RESERVE_EXCHANGE || 
-                            p.evalCode == EVAL_NONE)
+                        if (subFee <= txout.nValue)
                         {
-                            // add all values to a native equivalent
-                            // reserve currencies have a native value as well
-                            if (exchangeRates.IntersectingValues(reserveOutput).valueMap.size())
+                            txout.nValue -= subFee;
+                        }
+                        else if ((relevantReserves = reserveOutput.IntersectingValues(reserveCurrencies)).valueMap.size())
+                        {
+                            // if we will subtract from more than one currency, divide fee among them equally
+                            CAmount subSubFee = subFee / relevantReserves.valueMap.size();
+                            CAmount extraFee = subFee % relevantReserves.valueMap.size();
+                            // TODO: this does not support multi-currency, since the outputs do not. it will need
+                            // to be checked when we enable multi-currency outputs
+                            for (auto &oneCur : relevantReserves.valueMap)
                             {
-                                nativeEquivalent += currencyState.ReserveToNativeRaw(relevantReserves, exchangeRates.AsCurrencyVector(currencyState.currencies));
-                            }
-                            else
-                            {
-                                nativeEquivalent += reserveOutput.valueMap.size() ? reserveOutput.valueMap.begin()->second : 0;
-                            }
-                            
-                            if (nativeEquivalent < dustThreshold)
-                            {
-                                if (recipient.fSubtractFeeFromAmount && nFeeRet > 0)
+                                auto it = exchangeRates.valueMap.find(oneCur.first);
+                                assert(it != exchangeRates.valueMap.end());
+                                reserveOutput.valueMap[it->first] -= currencyState.NativeToReserveRaw(subFee + (extraFee ? 1 : 0), it->second);
+                                if (extraFee)
                                 {
-                                    if (nativeEquivalent < 0)
-                                        strFailReason = _("The transaction amount is too small to pay the fee");
-                                    else
-                                        strFailReason = _("The transaction amount is too small to send after the fee has been deducted");
+                                    extraFee--;
                                 }
+                            }
+                            txout.scriptPubKey.SetReserveOutValue(reserveOutput);
+                        }
+                        else
+                        {
+                            // asking to pay a fee on an output, but not being able to is not accepted, should
+                            // never get here, as it should have been checked above
+                            strFailReason = "Cannot subtract fee from amount on non-native, non-reserve currency outputs";
+                            return RPC_INVALID_PARAMETER;
+                        }
+                    }
+
+                    dustThreshold = txout.GetDustThreshold(::minRelayTxFee);
+
+                    // only non-crypto condition, and normal reserve outputs are subject to dust limitations
+                    if (!p.IsValid() || 
+                        p.evalCode == EVAL_RESERVE_OUTPUT || 
+                        p.evalCode == EVAL_RESERVE_DEPOSIT || 
+                        p.evalCode == EVAL_RESERVE_EXCHANGE || 
+                        p.evalCode == EVAL_NONE)
+                    {
+                        // add all values to a native equivalent
+                        // reserve currencies have a native value as well
+                        if (exchangeRates.IntersectingValues(reserveOutput).valueMap.size())
+                        {
+                            nativeEquivalent += currencyState.ReserveToNativeRaw(relevantReserves, exchangeRates.AsCurrencyVector(currencyState.currencies));
+                        }
+                        else
+                        {
+                            nativeEquivalent += reserveOutput.valueMap.size() ? reserveOutput.valueMap.begin()->second : 0;
+                        }
+                        
+                        if (nativeEquivalent < dustThreshold)
+                        {
+                            if (recipient.fSubtractFeeFromAmount && nFeeRet > 0)
+                            {
+                                if (nativeEquivalent < 0)
+                                    strFailReason = _("The transaction amount is too small to pay the fee");
                                 else
-                                    strFailReason = _("Transaction amount too small");
-                                return false;
+                                    strFailReason = _("The transaction amount is too small to send after the fee has been deducted");
+                            }
+                            else
+                                strFailReason = _("Transaction amount too small");
+                            return RPC_INVALID_PARAMETER;
+                        }
+                    }
+                }
+                txNew.vout.push_back(txout);
+            }
+
+            // Choose coins to use
+            set<pair<const CWalletTx*,unsigned int> > setCoins;
+            CCurrencyValueMap totalValueIn;
+            CAmount totalNativeValueIn = 0;
+            bool fOnlyCoinbaseCoins = false;
+            bool fNeedCoinbaseCoins = false;
+
+            if (!SelectReserveCoins(totalReserveValue, 
+                                    nTotalNativeValue, 
+                                    setCoins, 
+                                    totalValueIn, 
+                                    totalNativeValueIn, 
+                                    fOnlyCoinbaseCoins, 
+                                    fNeedCoinbaseCoins, 
+                                    coinControl,
+                                    pOnlyFromDest))
+            {
+                strFailReason = _("Insufficient funds");
+                return RPC_WALLET_INSUFFICIENT_FUNDS;
+            }
+
+            /*
+            if (totalValueIn.valueMap.count(ASSETCHAINS_CHAINID))
+            {
+                for (auto oneOut : setCoins)
+                {
+                    UniValue oneTxObj(UniValue::VOBJ);
+                    TxToUniv(*oneOut.first, uint256(), oneTxObj);
+                    printf("TRANSACTION\n%s\n", oneTxObj.write(1,2).c_str());
+                }
+                printf("totalValueIn: %s\ntotalReserveValue: %s\n", totalValueIn.ToUniValue().write().c_str(), totalReserveValue.ToUniValue().write().c_str());
+            }
+            */
+
+            std::vector<std::pair<std::pair<const CWalletTx*, unsigned int>, CAmount>> coinsWithEquivalentNative;
+            if (reserveCurrencies.valueMap.size())
+            {
+                BOOST_FOREACH(PAIRTYPE(const CWalletTx*, unsigned int) pcoin, setCoins)
+                {
+                    CAmount nCredit = pcoin.first->vout[pcoin.second].nValue + 
+                                    currencyState.ReserveToNativeRaw(reserveCurrencies.IntersectingValues(pcoin.first->vout[pcoin.second].ReserveOutValue()), 
+                                                                    exchangeRates.AsCurrencyVector(currencyState.currencies));
+                    coinsWithEquivalentNative.push_back(make_pair(pcoin, nCredit));
+                }
+            }
+
+            CCurrencyValueMap reserveChange = totalValueIn - totalReserveValue;
+
+            //printf("reservechange: %s\ntotalvaluein: %s\n", reserveChange.ToUniValue().write(1,2).c_str(), totalValueIn.ToUniValue().write(1,2).c_str());
+
+            CCurrencyValueMap convertibleChange = reserveCurrencies.IntersectingValues(reserveChange);
+            CAmount nChange = totalNativeValueIn - nTotalNativeValue;
+            CAmount nConvertedReserveChange = 0;
+
+            // /printf("tokenChange: %s\nnativeChange: %s\n", reserveChange.ToUniValue().write().c_str(), ValueFromAmount(nChange).write().c_str());
+
+            // if we will try to take the fee from change
+            if (nSubtractFeeFromAmount == 0)
+            {
+                if (nChange < nFeeRet && convertibleChange.valueMap.size())
+                {
+                    nConvertedReserveChange = currencyState.ReserveToNativeRaw(convertibleChange, 
+                                                                                exchangeRates.AsCurrencyVector(currencyState.currencies));
+                }
+                nChange -= nFeeRet;
+            }
+
+            if ((nChange + nConvertedReserveChange > 0) || (reserveChange > CCurrencyValueMap()))
+            {
+                // if we can and need to convert reserves, adjust reserve change output amounts as needed
+                if (nChange < 0 && convertibleChange.valueMap.size())
+                {
+                    // no native change output, so, convert what's needed and make reserve output(s)
+                    // attempt to convert equally across currencies, and if we fail, take the rest as
+                    // first come, first served
+                    CAmount nChangePerCur = -nChange / convertibleChange.valueMap.size();
+                    CAmount nChangeMod = -nChange % convertibleChange.valueMap.size();
+                    CAmount remainder = 0;
+                    nChange = 0;
+                    for (int i = 0; i < currencyState.currencies.size(); i++)
+                    {
+                        auto it = reserveChange.valueMap.find(currencyState.currencies[i]);
+                        if (it != reserveChange.valueMap.end())
+                        {
+                            CAmount feeAsReserve = currencyState.NativeToReserve(nChangePerCur + (nChangeMod ? 1 : 0), i);
+                            if (it->second - feeAsReserve <= 0)
+                            {
+                                // if we don't have enough reserve in this currency for its part of the fee, we will
+                                // take it all, and then take more from the other currencies as needed
+                                remainder += currencyState.ReserveToNative(feeAsReserve - it->second, i);
+                                reserveChange.valueMap.erase(it);
+                            }
+                            else
+                            {
+                                it->second -= feeAsReserve;
                             }
                         }
                     }
-                    txNew.vout.push_back(txout);
-                }
-
-                // Choose coins to use
-                set<pair<const CWalletTx*,unsigned int> > setCoins;
-                CCurrencyValueMap totalValueIn;
-                CAmount totalNativeValueIn = 0;
-                bool fOnlyCoinbaseCoins = false;
-                bool fNeedCoinbaseCoins = false;
-
-                if (!SelectReserveCoins(totalReserveValue, 
-                                        nTotalNativeValue, 
-                                        setCoins, 
-                                        totalValueIn, 
-                                        totalNativeValueIn, 
-                                        fOnlyCoinbaseCoins, 
-                                        fNeedCoinbaseCoins, 
-                                        coinControl,
-                                        pOnlyFromDest))
-                {
-                    strFailReason = _("Insufficient funds");
-                    return false;
-                }
-
-                /*
-                if (totalValueIn.valueMap.count(ASSETCHAINS_CHAINID))
-                {
-                    for (auto oneOut : setCoins)
+                    // if we have any fee left to convert because we were short on some currency, take it
+                    // from the remaining reserves in change
+                    if (remainder)
                     {
-                        UniValue oneTxObj(UniValue::VOBJ);
-                        TxToUniv(*oneOut.first, uint256(), oneTxObj);
-                        printf("TRANSACTION\n%s\n", oneTxObj.write(1,2).c_str());
-                    }
-                    printf("totalValueIn: %s\ntotalReserveValue: %s\n", totalValueIn.ToUniValue().write().c_str(), totalReserveValue.ToUniValue().write().c_str());
-                }
-                */
-
-                std::vector<std::pair<std::pair<const CWalletTx*, unsigned int>, CAmount>> coinsWithEquivalentNative;
-                if (reserveCurrencies.valueMap.size())
-                {
-                    BOOST_FOREACH(PAIRTYPE(const CWalletTx*, unsigned int) pcoin, setCoins)
-                    {
-                        CAmount nCredit = pcoin.first->vout[pcoin.second].nValue + 
-                                        currencyState.ReserveToNativeRaw(reserveCurrencies.IntersectingValues(pcoin.first->vout[pcoin.second].ReserveOutValue()), 
-                                                                        exchangeRates.AsCurrencyVector(currencyState.currencies));
-                        coinsWithEquivalentNative.push_back(make_pair(pcoin, nCredit));
-                    }
-                }
-
-                CCurrencyValueMap reserveChange = totalValueIn - totalReserveValue;
-
-                //printf("reservechange: %s\ntotalvaluein: %s\n", reserveChange.ToUniValue().write(1,2).c_str(), totalValueIn.ToUniValue().write(1,2).c_str());
-
-                CCurrencyValueMap convertibleChange = reserveCurrencies.IntersectingValues(reserveChange);
-                CAmount nChange = totalNativeValueIn - nTotalNativeValue;
-                CAmount nConvertedReserveChange = 0;
-
-                // /printf("tokenChange: %s\nnativeChange: %s\n", reserveChange.ToUniValue().write().c_str(), ValueFromAmount(nChange).write().c_str());
-
-                // if we will try to take the fee from change
-                if (nSubtractFeeFromAmount == 0)
-                {
-                    if (nChange < nFeeRet && convertibleChange.valueMap.size())
-                    {
-                        nConvertedReserveChange = currencyState.ReserveToNativeRaw(convertibleChange, 
-                                                                                   exchangeRates.AsCurrencyVector(currencyState.currencies));
-                    }
-                    nChange -= nFeeRet;
-                }
-
-                if ((nChange + nConvertedReserveChange > 0) || (reserveChange > CCurrencyValueMap()))
-                {
-                    // if we can and need to convert reserves, adjust reserve change output amounts as needed
-                    if (nChange < 0 && convertibleChange.valueMap.size())
-                    {
-                        // no native change output, so, convert what's needed and make reserve output(s)
-                        // attempt to convert equally across currencies, and if we fail, take the rest as
-                        // first come, first served
-                        CAmount nChangePerCur = -nChange / convertibleChange.valueMap.size();
-                        CAmount nChangeMod = -nChange % convertibleChange.valueMap.size();
-                        CAmount remainder = 0;
-                        nChange = 0;
                         for (int i = 0; i < currencyState.currencies.size(); i++)
                         {
                             auto it = reserveChange.valueMap.find(currencyState.currencies[i]);
                             if (it != reserveChange.valueMap.end())
                             {
-                                CAmount feeAsReserve = currencyState.NativeToReserve(nChangePerCur + (nChangeMod ? 1 : 0), i);
+                                CAmount feeAsReserve = currencyState.NativeToReserve(remainder, i);
                                 if (it->second - feeAsReserve <= 0)
                                 {
                                     // if we don't have enough reserve in this currency for its part of the fee, we will
                                     // take it all, and then take more from the other currencies as needed
-                                    remainder += currencyState.ReserveToNative(feeAsReserve - it->second, i);
                                     reserveChange.valueMap.erase(it);
+                                    remainder -= currencyState.ReserveToNative(it->second, i);
                                 }
                                 else
                                 {
                                     it->second -= feeAsReserve;
-                                }
-                            }
-                        }
-                        // if we have any fee left to convert because we were short on some currency, take it
-                        // from the remaining reserves in change
-                        if (remainder)
-                        {
-                            for (int i = 0; i < currencyState.currencies.size(); i++)
-                            {
-                                auto it = reserveChange.valueMap.find(currencyState.currencies[i]);
-                                if (it != reserveChange.valueMap.end())
-                                {
-                                    CAmount feeAsReserve = currencyState.NativeToReserve(remainder, i);
-                                    if (it->second - feeAsReserve <= 0)
-                                    {
-                                        // if we don't have enough reserve in this currency for its part of the fee, we will
-                                        // take it all, and then take more from the other currencies as needed
-                                        reserveChange.valueMap.erase(it);
-                                        remainder -= currencyState.ReserveToNative(it->second, i);
-                                    }
-                                    else
-                                    {
-                                        it->second -= feeAsReserve;
-                                        break;
-                                    }
+                                    break;
                                 }
                             }
                         }
                     }
+                }
 
-                    // coin control: send change to custom address
+                // coin control: send change to custom address
 
-                    // reserve tokens can currently only be sent to public keys or addresses that are in the current wallet
-                    // since reserve token outputs are CCs by definition
-                    CTxDestination changeDest;
-                    if (coinControl && coinControl->destChange.which() != COptCCParams::ADDRTYPE_INVALID)
+                // reserve tokens can currently only be sent to public keys or addresses that are in the current wallet
+                // since reserve token outputs are CCs by definition
+                CTxDestination changeDest;
+                if (coinControl && coinControl->destChange.which() != COptCCParams::ADDRTYPE_INVALID)
+                {
+                    changeDest = coinControl->destChange;
+                }
+                else
+                {
+                    // no coin control: send change to newly generated address
+
+                    // Note: We use a new key here to keep it from being obvious which side is the change.
+                    //  The drawback is that by not reusing a previous key, the change may be lost if a
+                    //  backup is restored, if the backup doesn't have the new private key for the change.
+                    //  If we reused the old key, it would be possible to add code to look for and
+                    //  rediscover unknown transactions that were written with keys of ours to recover
+                    //  post-backup change.
+
+                    // Reserve a new key pair from key pool
+                    extern int32_t USE_EXTERNAL_PUBKEY; extern std::string NOTARY_PUBKEY;
+                    CPubKey pubKey;
+                    if ( USE_EXTERNAL_PUBKEY == 0 )
                     {
-                        changeDest = coinControl->destChange;
+                        bool ret;
+                        ret = reservekey.GetReservedKey(pubKey);
+                        assert(ret); // should never fail, as we just unlocked
                     }
                     else
                     {
-                        // no coin control: send change to newly generated address
-
-                        // Note: We use a new key here to keep it from being obvious which side is the change.
-                        //  The drawback is that by not reusing a previous key, the change may be lost if a
-                        //  backup is restored, if the backup doesn't have the new private key for the change.
-                        //  If we reused the old key, it would be possible to add code to look for and
-                        //  rediscover unknown transactions that were written with keys of ours to recover
-                        //  post-backup change.
-
-                        // Reserve a new key pair from key pool
-                        extern int32_t USE_EXTERNAL_PUBKEY; extern std::string NOTARY_PUBKEY;
-                        CPubKey pubKey;
-                        if ( USE_EXTERNAL_PUBKEY == 0 )
-                        {
-                            bool ret;
-                            ret = reservekey.GetReservedKey(pubKey);
-                            assert(ret); // should never fail, as we just unlocked
-                        }
-                        else
-                        {
-                            //fprintf(stderr,"use notary pubkey\n");
-                            pubKey = CPubKey(ParseHex(NOTARY_PUBKEY));
-                        }
-                        changeDest = CTxDestination(pubKey);
+                        //fprintf(stderr,"use notary pubkey\n");
+                        pubKey = CPubKey(ParseHex(NOTARY_PUBKEY));
                     }
+                    changeDest = CTxDestination(pubKey);
+                }
 
-                    // generate all necessary change outputs for all currencies
-                    // first determine if any outputs left are dust. if so, just add them to the fee
-                    if (nChange < dustThreshold)
+                // generate all necessary change outputs for all currencies
+                // first determine if any outputs left are dust. if so, just add them to the fee
+                if (nChange < dustThreshold)
+                {
+                    nFeeRet += nChange;
+                    nChange = 0;
+                }
+                else
+                {
+                    nChangePosRet = txNew.vout.size() - 1; // dont change first or last
+                    nChangeOutputs++;
+                    vector<CTxOut>::iterator position = txNew.vout.begin() + nChangePosRet;
+                    txNew.vout.insert(position, CTxOut(nChange, GetScriptForDestination(changeDest)));
+                }
+
+                // now, loop through the remaining reserve currencies and make a change output for each
+                // if dust, just remove
+                auto reserveIndexMap = currencyState.GetReserveMap();
+                for (auto &curChangeOut : reserveChange.valueMap)
+                {
+                    CAmount outVal;
+                    assert(curChangeOut.first != ASSETCHAINS_CHAINID);
+                    auto curIt = reserveIndexMap.find(curChangeOut.first);
+                    if (curIt != reserveIndexMap.end())
                     {
-                        nFeeRet += nChange;
-                        nChange = 0;
+                        outVal = currencyState.ReserveToNative(curChangeOut.second, curIt->second);
                     }
                     else
                     {
-                        nChangePosRet = txNew.vout.size() - 1; // dont change first or last
-                        nChangeOutputs++;
-                        vector<CTxOut>::iterator position = txNew.vout.begin() + nChangePosRet;
-                        txNew.vout.insert(position, CTxOut(nChange, GetScriptForDestination(changeDest)));
+                        outVal = curChangeOut.second;
                     }
-
-                    // now, loop through the remaining reserve currencies and make a change output for each
-                    // if dust, just remove
-                    auto reserveIndexMap = currencyState.GetReserveMap();
-                    for (auto &curChangeOut : reserveChange.valueMap)
+                    
+                    if (outVal >= dustThreshold)
                     {
-                        CAmount outVal;
-                        assert(curChangeOut.first != ASSETCHAINS_CHAINID);
-                        auto curIt = reserveIndexMap.find(curChangeOut.first);
-                        if (curIt != reserveIndexMap.end())
-                        {
-                            outVal = currencyState.ReserveToNative(curChangeOut.second, curIt->second);
-                        }
-                        else
-                        {
-                            outVal = curChangeOut.second;
-                        }
-                        
-                        if (outVal >= dustThreshold)
-                        {
-                            vector<CTxOut>::iterator position = txNew.vout.begin() + (nChangePosRet + nChangeOutputs++);
-                            CTokenOutput to = CTokenOutput(curChangeOut.first, curChangeOut.second);
-                            txNew.vout.insert(position, CTxOut(0, MakeMofNCCScript(CConditionObj<CTokenOutput>(EVAL_RESERVE_OUTPUT, {changeDest}, 1, &to))));
-                        }
-                        // if it is dust and we cannot convert to native, drop it. it may be taken by the miner
-                        else if (curIt != reserveIndexMap.end())
-                        {
-                            nFeeRet += outVal;
-                        }
+                        vector<CTxOut>::iterator position = txNew.vout.begin() + (nChangePosRet + nChangeOutputs++);
+                        CTokenOutput to = CTokenOutput(curChangeOut.first, curChangeOut.second);
+                        txNew.vout.insert(position, CTxOut(0, MakeMofNCCScript(CConditionObj<CTokenOutput>(EVAL_RESERVE_OUTPUT, {changeDest}, 1, &to))));
                     }
-
-                    // if we made no change outputs, return the key
-                    if (!nChangeOutputs)
+                    // if it is dust and we cannot convert to native, drop it. it may be taken by the miner
+                    else if (curIt != reserveIndexMap.end())
                     {
-                        reservekey.ReturnKey();
-                    }
-                } else reservekey.ReturnKey();
-
-                // Fill vin
-                //
-                // Note how the sequence number is set to max()-1 so that the
-                // nLockTime set above actually works.
-                for (auto &oneIn : extraInputs)
-                {
-                    auto wit = mapWallet.find(oneIn.prevout.hash);
-                    if (wit != mapWallet.end() &&
-                        wit->second.vout.size() > oneIn.prevout.n &&
-                        !wit->second.vout[oneIn.prevout.n].nValue &&
-                        wit->second.vout[oneIn.prevout.n].ReserveOutValue() == CCurrencyValueMap())
-                    {
-                        setCoins.insert(std::make_pair(&(wit->second), oneIn.prevout.n));
-                    }
-                    else
-                    {
-                        setCoins.clear();
-                        break;
-                    }
-                }
-                BOOST_FOREACH(const PAIRTYPE(const CWalletTx*,unsigned int)& coin, setCoins)
-                    txNew.vin.push_back(CTxIn(coin.first->GetHash(),coin.second,CScript(),
-                                              std::numeric_limits<unsigned int>::max()-1));
-
-                // Check mempooltxinputlimit to avoid creating a transaction which the local mempool rejects
-                size_t limit = (size_t)GetArg("-mempooltxinputlimit", 0);
-                {
-                    LOCK(cs_main);
-                    if (Params().GetConsensus().NetworkUpgradeActive(chainActive.Height() + 1, Consensus::UPGRADE_OVERWINTER)) {
-                        limit = 0;
-                    }
-                }
-                if (limit > 0) {
-                    size_t n = txNew.vin.size();
-                    if (n > limit) {
-                        strFailReason = _(strprintf("Too many transparent inputs %zu > limit %zu", n, limit).c_str());
-                        return false;
+                        nFeeRet += outVal;
                     }
                 }
 
-                // Grab the current consensus branch ID
-                auto consensusBranchId = CurrentEpochBranchId(chainActive.Height() + 1, Params().GetConsensus());
-
-                // Sign
-                int nIn = 0;
-                CTransaction txNewConst(txNew);
-                BOOST_FOREACH(const PAIRTYPE(const CWalletTx*,unsigned int)& coin, setCoins)
+                // if we made no change outputs, return the key
+                if (!nChangeOutputs)
                 {
-                    bool signSuccess;
-                    const CScript& scriptPubKey = coin.first->vout[coin.second].scriptPubKey;
-                    SignatureData sigdata;
-                    if (sign)
-                        signSuccess = ProduceSignature(TransactionSignatureCreator(this, &txNewConst, nIn, coin.first->vout[coin.second].nValue, scriptPubKey), scriptPubKey, sigdata, consensusBranchId);
-                    else
-                        signSuccess = ProduceSignature(DummySignatureCreator(this), scriptPubKey, sigdata, consensusBranchId);
-
-                    if (!signSuccess)
-                    {
-                        strFailReason = _("Signing transaction failed");
-                        return false;
-                    } else {
-                        UpdateTransaction(txNew, nIn, sigdata);
-                    }
-
-                    nIn++;
+                    reservekey.ReturnKey();
                 }
+            } else reservekey.ReturnKey();
 
-                unsigned int nBytes = ::GetSerializeSize(txNew, SER_NETWORK, PROTOCOL_VERSION);
-
-                // Remove scriptSigs if we used dummy signatures for fee calculation
-                if (!sign) {
-                    BOOST_FOREACH (CTxIn& vin, txNew.vin)
-                        vin.scriptSig = CScript();
-                }
-
-                // Embed the constructed transaction data in wtxNew.
-                *static_cast<CTransaction*>(&wtxNew) = CTransaction(txNew);
-
-                // Limit size
-                if (nBytes >= max_tx_size)
+            // Fill vin
+            //
+            // Note how the sequence number is set to max()-1 so that the
+            // nLockTime set above actually works.
+            for (auto &oneIn : extraInputs)
+            {
+                auto wit = mapWallet.find(oneIn.prevout.hash);
+                if (wit != mapWallet.end() &&
+                    wit->second.vout.size() > oneIn.prevout.n &&
+                    !wit->second.vout[oneIn.prevout.n].nValue &&
+                    wit->second.vout[oneIn.prevout.n].ReserveOutValue() == CCurrencyValueMap())
                 {
-                    strFailReason = _("Transaction too large");
-                    return false;
+                    setCoins.insert(std::make_pair(&(wit->second), oneIn.prevout.n));
                 }
-
-                dPriority = wtxNew.ComputePriority(dPriority, nBytes);
-
-                // Can we complete this as a free transaction?
-                if (fSendFreeTransactions && nBytes <= MAX_FREE_TRANSACTION_CREATE_SIZE)
+                else
                 {
-                    // Not enough fee: enough priority?
-                    double dPriorityNeeded = mempool.estimatePriority(nTxConfirmTarget);
-                    // Not enough mempool history to estimate: use hard-coded AllowFree.
-                    if (dPriorityNeeded <= 0 && AllowFree(dPriority))
-                        break;
-
-                    // Small enough, and priority high enough, to send for free
-                    if (dPriorityNeeded > 0 && dPriority >= dPriorityNeeded)
-                        break;
+                    setCoins.clear();
+                    break;
                 }
-
-                CAmount nFeeNeeded = GetMinimumFee(nBytes, nTxConfirmTarget, mempool);
-                if ( nFeeNeeded < 5000 )
-                    nFeeNeeded = 5000;
-
-                // If we made it here and we aren't even able to meet the relay fee on the next pass, give up
-                // because we must be at the maximum allowed fee.
-                if (nFeeNeeded < ::minRelayTxFee.GetFee(nBytes))
-                {
-                    strFailReason = _("Transaction too large for fee policy");
-                    return false;
-                }
-
-                if (nFeeRet >= nFeeNeeded)
-                    break; // Done, enough fee included.
-
-                // Include more fee and try again.
-                nFeeRet = nFeeNeeded;
-                continue;
             }
+            BOOST_FOREACH(const PAIRTYPE(const CWalletTx*,unsigned int)& coin, setCoins)
+                txNew.vin.push_back(CTxIn(coin.first->GetHash(),coin.second,CScript(),
+                                            std::numeric_limits<unsigned int>::max()-1));
+
+            // Check mempooltxinputlimit to avoid creating a transaction which the local mempool rejects
+            size_t limit = (size_t)GetArg("-mempooltxinputlimit", 0);
+            {
+                LOCK(cs_main);
+                if (Params().GetConsensus().NetworkUpgradeActive(chainActive.Height() + 1, Consensus::UPGRADE_OVERWINTER)) {
+                    limit = 0;
+                }
+            }
+            if (limit > 0) {
+                size_t n = txNew.vin.size();
+                if (n > limit) {
+                    strFailReason = _(strprintf("Too many transparent inputs %zu > limit %zu", n, limit).c_str());
+                    return RPC_INVALID_PARAMETER;
+                }
+            }
+
+            // Grab the current consensus branch ID
+            auto consensusBranchId = CurrentEpochBranchId(chainActive.Height() + 1, Params().GetConsensus());
+
+            // Sign
+            int nIn = 0;
+            CTransaction txNewConst(txNew);
+            BOOST_FOREACH(const PAIRTYPE(const CWalletTx*,unsigned int)& coin, setCoins)
+            {
+                bool signSuccess;
+                const CScript& scriptPubKey = coin.first->vout[coin.second].scriptPubKey;
+                SignatureData sigdata;
+                if (sign)
+                    signSuccess = ProduceSignature(TransactionSignatureCreator(this, &txNewConst, nIn, coin.first->vout[coin.second].nValue, scriptPubKey), scriptPubKey, sigdata, consensusBranchId);
+                else
+                    signSuccess = ProduceSignature(DummySignatureCreator(this), scriptPubKey, sigdata, consensusBranchId);
+
+                if (!signSuccess)
+                {
+                    strFailReason = _("Signing transaction failed");
+                    return RPC_TRANSACTION_ERROR;
+                } else {
+                    UpdateTransaction(txNew, nIn, sigdata);
+                }
+
+                nIn++;
+            }
+
+            unsigned int nBytes = ::GetSerializeSize(txNew, SER_NETWORK, PROTOCOL_VERSION);
+
+            // Remove scriptSigs if we used dummy signatures for fee calculation
+            if (!sign) {
+                BOOST_FOREACH (CTxIn& vin, txNew.vin)
+                    vin.scriptSig = CScript();
+            }
+
+            // Embed the constructed transaction data in wtxNew.
+            *static_cast<CTransaction*>(&wtxNew) = CTransaction(txNew);
+
+            // Limit size
+            if (nBytes >= max_tx_size)
+            {
+                strFailReason = _("Transaction too large");
+                return RPC_TRANSACTION_ERROR;
+            }
+
+            dPriority = wtxNew.ComputePriority(dPriority, nBytes);
+
+            // Can we complete this as a free transaction?
+            if (fSendFreeTransactions && nBytes <= MAX_FREE_TRANSACTION_CREATE_SIZE)
+            {
+                // Not enough fee: enough priority?
+                double dPriorityNeeded = mempool.estimatePriority(nTxConfirmTarget);
+                // Not enough mempool history to estimate: use hard-coded AllowFree.
+                if (dPriorityNeeded <= 0 && AllowFree(dPriority))
+                    break;
+
+                // Small enough, and priority high enough, to send for free
+                if (dPriorityNeeded > 0 && dPriority >= dPriorityNeeded)
+                    break;
+            }
+
+            CAmount nFeeNeeded = GetMinimumFee(nBytes, nTxConfirmTarget, mempool);
+            if ( nFeeNeeded < 5000 )
+                nFeeNeeded = 5000;
+
+            // If we made it here and we aren't even able to meet the relay fee on the next pass, give up
+            // because we must be at the maximum allowed fee.
+            if (nFeeNeeded < ::minRelayTxFee.GetFee(nBytes))
+            {
+                strFailReason = _("Transaction too large for fee policy");
+                return RPC_TRANSACTION_ERROR;
+            }
+
+            if (nFeeRet >= nFeeNeeded)
+                break; // Done, enough fee included.
+
+            // Include more fee and try again.
+            nFeeRet = nFeeNeeded;
+            continue;
         }
     }
-    return true;
+    return RPC_OK;
 }
 
 /**
@@ -7107,9 +7124,33 @@ void CWallet::UpdatedTransaction(const uint256 &hashTx)
     }
 }
 
+class MiningAddressScript : public CReserveScript
+{
+    // CReserveScript requires implementing this function, so that if an
+    // internal (not-visible) wallet address is used, the wallet can mark it as
+    // important when a block is mined (so it then appears to the user).
+    // If -mineraddress is set, the user already knows about and is managing the
+    // address, so we don't need to do anything here.
+    void KeepScript() {}
+};
+
+void GetScriptForMiningAddress(boost::shared_ptr<CReserveScript> &script)
+{
+    CTxDestination addr = DecodeDestination(GetArg("-mineraddress", ""));
+    if (!IsValidDestination(addr)) {
+        return;
+    }
+
+    boost::shared_ptr<MiningAddressScript> mAddr(new MiningAddressScript());
+    script = mAddr;
+    script->reserveScript = GetScriptForDestination(addr);
+}
+
 void CWallet::GetScriptForMining(boost::shared_ptr<CReserveScript> &script)
 {
-    if (!GetArg("-mineraddress", "").empty()) {
+    if (!GetArg("-mineraddress", "").empty())
+    {
+        GetScriptForMiningAddress(script);
         return;
     }
 

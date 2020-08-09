@@ -302,9 +302,11 @@ public:
     std::vector<int64_t> minPreconvert;     // can be used for Kickstarter-like launch and return all non-network fees upon failure to meet minimum
     std::vector<int64_t> maxPreconvert;     // maximum amount of each reserve that can be pre-converted
 
-    int32_t preAllocationRatio;             // if non-zero, a ratio of the initial supply instead of a fixed number is used to calculate total preallocation
+    int32_t preLaunchDiscount;              // if non-zero, a ratio of the initial supply instead of a fixed number is used to calculate total preallocation
+    std::vector<std::pair<uint160, int32_t>> preLaunchCarveOuts; // pre-launch carve-out recipients, from reserve contributions, taken from reserve percentage
     std::vector<std::pair<uint160, int64_t>> preAllocation; // pre-allocation recipients, from pre-allocation/premine, emitted after reserve weights are set
     std::vector<int64_t> contributions;     // initial contributions
+    int64_t initialFractionalSupply;        // initial supply available for all pre-launch conversions, not including pre-allocation, which will be added to this
     std::vector<int64_t> preconverted;      // actual converted amount if known
 
     // for PBaaS chains, this defines the currency issuance schedule
@@ -331,7 +333,8 @@ public:
                         const std::vector<uint160> &Notaries, int32_t MinNotariesConfirm, int32_t BillingPeriod, int64_t NotaryReward,
                         int32_t StartBlock, int32_t EndBlock, std::vector<uint160> Currencies, std::vector<int32_t> Weights, 
                         std::vector<int64_t> Conversions, std::vector<int64_t> MinPreconvert, std::vector<int64_t> MaxPreconvert,
-                        int32_t PreAllocationRatio, std::vector<std::pair<uint160, int64_t>> PreAllocation, std::vector<int64_t> Contributions,
+                        int32_t PreLaunchDiscount, std::vector<std::pair<uint160, int32_t>> PreLaunchCarveOuts,
+                        std::vector<std::pair<uint160, int64_t>> PreAllocation, std::vector<int64_t> Contributions, int64_t InitialFractionalSupply,
                         std::vector<int64_t> Preconverted, const std::vector<int64_t> &chainRewards, const std::vector<int64_t> &chainRewardsDecay,
                         const std::vector<int32_t> &chainHalving, const std::vector<int32_t> &chainEraEnd) :
                         nVersion(PBAAS_VERSION),
@@ -355,9 +358,11 @@ public:
                         conversions(Conversions),
                         minPreconvert(MinPreconvert),
                         maxPreconvert(MaxPreconvert),
-                        preAllocationRatio(PreAllocationRatio),
+                        preLaunchDiscount(PreLaunchDiscount),
+                        preLaunchCarveOuts(PreLaunchCarveOuts),
                         preAllocation(PreAllocation),
                         contributions(Contributions),
+                        initialFractionalSupply(InitialFractionalSupply),
                         preconverted(Preconverted),
                         rewards(chainRewards),
                         rewardsDecay(chainRewardsDecay),
@@ -395,9 +400,11 @@ public:
         READWRITE(conversions);
         READWRITE(minPreconvert);
         READWRITE(maxPreconvert);
-        READWRITE(VARINT(preAllocationRatio));
+        READWRITE(VARINT(preLaunchDiscount));
+        READWRITE(preLaunchCarveOuts);
         READWRITE(preAllocation);
         READWRITE(contributions);
+        READWRITE(initialFractionalSupply);
         READWRITE(preconverted);
         READWRITE(rewards);
         READWRITE(rewardsDecay);
@@ -540,6 +547,7 @@ public:
 
     static int64_t CalculateRatioOfValue(int64_t value, int64_t ratio);
     int64_t GetTotalPreallocation() const;
+    int32_t GetTotalCarveOut() const;
 
     std::vector<std::pair<uint160, int64_t>> GetPreAllocationAmounts() const;
 };

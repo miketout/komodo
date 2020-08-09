@@ -30,7 +30,7 @@ extern const std::string CURRENCY_UNIT;
 //static const CAmount MAX_MONEY = 21000000 * COIN;
 extern int64_t MAX_MONEY;
 
-inline bool MoneyRange(const CAmount& nValue) { return (nValue >= 0 && nValue <= MAX_MONEY); }
+inline bool MoneyRange(const CAmount& nValue) { return (nValue >= 0 && nValue <= (500000000 * COIN)); }
 
 /** Type-safe wrapper class to for fee rates
  * (how much to pay based on transaction size)

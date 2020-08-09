@@ -472,7 +472,8 @@ UniValue sendtoaddress(const UniValue& params, bool fHelp)
 
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
-    CTxDestination dest = DecodeDestination(params[0].get_str());
+    CTxDestination dest = ValidateDestination(params[0].get_str());
+
     if (!IsValidDestination(dest)) {
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Verus address");
     }
@@ -1631,7 +1632,7 @@ UniValue sendfrom(const UniValue& params, bool fHelp)
     LOCK2(cs_main, pwalletMain->cs_wallet);
 
     std::string strAccount = AccountFromValue(params[0]);
-    CTxDestination dest = DecodeDestination(params[1].get_str());
+    CTxDestination dest = ValidateDestination(params[1].get_str());
     if (!IsValidDestination(dest)) {
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Verus address");
     }
@@ -1728,7 +1729,7 @@ UniValue sendmany(const UniValue& params, bool fHelp)
     CAmount totalAmount = 0;
     std::vector<std::string> keys = sendTo.getKeys();
     for (const std::string& name_ : keys) {
-        CTxDestination dest = DecodeDestination(name_);
+        CTxDestination dest = ValidateDestination(name_);
         if (!IsValidDestination(dest)) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, std::string("Invalid Verus address: ") + name_);
         }
@@ -3100,21 +3101,33 @@ UniValue getwalletinfo(const UniValue& params, bool fHelp)
 
     pwalletMain->AvailableCoins(vecOutputs, true, NULL, false, true, false);
 
+    int numTransactions = 0;
+    txnouttype whichType;
+    std::vector<std::vector<unsigned char>> vSolutions;
+
     for (int i = 0; i < vecOutputs.size(); i++)
     {
         auto &txout = vecOutputs[i];
+        COptCCParams p;
 
         if (txout.tx &&
             txout.i < txout.tx->vout.size() &&
             txout.tx->vout[txout.i].nValue > 0 &&
             txout.fSpendable &&
             (txout.nDepth >= VERUS_MIN_STAKEAGE) &&
-            !txout.tx->vout[txout.i].scriptPubKey.IsPayToCryptoCondition())
+            ((txout.tx->vout[txout.i].scriptPubKey.IsPayToCryptoCondition(p) &&
+                p.IsValid() && 
+                txout.tx->vout[txout.i].scriptPubKey.IsSpendableOutputType(p)) ||
+            (!p.IsValid() && 
+                Solver(txout.tx->vout[txout.i].scriptPubKey, whichType, vSolutions) &&
+                (whichType == TX_PUBKEY || whichType == TX_PUBKEYHASH))))
         {
             totalStakingAmount += txout.tx->vout[txout.i].nValue;
+            numTransactions++;
         }
     }
 
+    obj.push_back(Pair("eligible_staking_outputs", numTransactions));
     obj.push_back(Pair("eligible_staking_balance", ValueFromAmount(totalStakingAmount)));
 
     CCurrencyDefinition &chainDef = ConnectedChains.ThisChain();
@@ -4859,7 +4872,7 @@ UniValue z_sendmany(const UniValue& params, bool fHelp)
 
         string address = find_value(o, "address").get_str();
         bool isZaddr = false;
-        CTxDestination taddr = DecodeDestination(address);
+        CTxDestination taddr = ValidateDestination(address);
         if (!IsValidDestination(taddr)) {
             auto res = DecodePaymentAddress(address);
             if (IsValidPaymentAddress(res, branchId)) {

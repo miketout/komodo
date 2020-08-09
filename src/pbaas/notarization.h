@@ -115,7 +115,7 @@ public:
                        const uint256 &MMRRoot,
                        const uint256 &preHash,
                        const uint256 &compactpower,
-                       const CCurrencyState &currencystate,
+                       const CCoinbaseCurrencyState &currencystate,
                        const uint256 &prevnotarization,
                        int32_t prevheight,
                        const uint256 &crossnotarization,
@@ -150,6 +150,8 @@ public:
     }
 
     CPBaaSNotarization(const CTransaction &tx, int32_t *pOutIdx=nullptr);
+
+    CPBaaSNotarization(const CScript &scriptPubKey);
 
     CPBaaSNotarization(const UniValue &obj);
 
@@ -193,6 +195,14 @@ public:
     {
         return !mmrRoot.IsNull();
     }
+
+    // if false, *this is unmodifed, otherwise, it is set to the last valid notarization in the requested range
+    bool GetLastNotarization(const uint160 &currencyID, 
+                             uint32_t eCode, 
+                             int32_t startHeight=0, 
+                             int32_t endHeight=0, 
+                             uint256 *txIDOut=nullptr,
+                             CTransaction *txOut=nullptr);
 
     UniValue ToUniValue() const;
 };

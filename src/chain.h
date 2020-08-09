@@ -655,12 +655,24 @@ public:
         return block.GetHash();
     }
 
-
     std::string ToString() const
     {
-        std::string str = "CDiskBlockIndex(";
-        str += strprintf("nVersion=%x, pprev=%p, nHeight=%d, merkle=%s\nhashBlock=%s, hashPrev=%s)\n",
-            this->nVersion, pprev, this->chainPower.nHeight, hashMerkleRoot.ToString(), GetBlockHash().ToString(), hashPrev.ToString());
+        std::string str = "CDiskBlockIndex:\n";
+
+        CBlockHeader block;
+        block.nVersion        = nVersion;
+        block.hashPrevBlock   = hashPrev;
+        block.hashMerkleRoot  = hashMerkleRoot;
+        block.hashFinalSaplingRoot    = hashFinalSaplingRoot;
+        block.nTime           = nTime;
+        block.nBits           = nBits;
+        block.nNonce          = nNonce;
+        block.nSolution       = nSolution;
+        CPBaaSPreHeader preBlock(block);
+
+        str += strprintf("block.nVersion=%x\npprev=%p\nnHeight=%d\nhashBlock=%s\nblock.hashPrevBlock=%s\nblock.hashMerkleRoot=%s\nblock.nBits=%d\nblock.nNonce=%s\nblock.nSolution=%s\npreBlock.hashPrevMMRRoot=%s\npreBlock.hashBlockMMRRoot=%s\n",
+            this->nVersion, pprev, this->chainPower.nHeight, GetBlockHash().ToString(), hashPrev.ToString(), hashMerkleRoot.ToString(), nBits, nNonce.ToString(), HexBytes(nSolution.data(), nSolution.size()), preBlock.hashPrevMMRRoot.ToString(), preBlock.hashBlockMMRRoot.ToString());
+
         return str;
     }
 };

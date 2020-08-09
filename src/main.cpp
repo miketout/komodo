@@ -1503,7 +1503,7 @@ bool CheckTransactionWithoutProofVerification(const CTransaction& tx, CValidatio
                 return state.DoS(100, error("CheckTransaction(): this is a private chain, no public allowed"),REJECT_INVALID, "bad-txns-acprivacy-chain");
         }
         if ( txout.scriptPubKey.size() > IGUANA_MAXSCRIPTSIZE )
-            return state.DoS(100, error("CheckTransaction(): txout.scriptPubKey.size() too big"),REJECT_INVALID, "bad-txns-vout-negative");
+            return state.DoS(100, error("CheckTransaction(): txout.scriptPubKey.size() too big"),REJECT_INVALID, "bad-txns-script-too-big");
         nValueOut += txout.nValue;
         if (!MoneyRange(nValueOut))
             return state.DoS(100, error("CheckTransaction(): txout total out of range"),
@@ -2757,9 +2757,10 @@ namespace Consensus {
 
         if (cci.IsValid())
         {
-            ReserveValueIn = rtxd.ReserveInputMap() + rtxd.ReserveOutConvertedMap();
-            //printf("cci.importValue:\n%s\n rtxd.ReserveInputMap():\n%s, rtxd.ReserveOutConvertedMap():\n%s\n", cci.importValue.ToUniValue().write(1, 2).c_str(), 
-            //    rtxd.ReserveInputMap().ToUniValue().write(1, 2).c_str(), rtxd.ReserveOutConvertedMap().ToUniValue().write(1, 2).c_str());
+            ReserveValueIn = rtxd.ReserveInputMap() + CCurrencyValueMap({cci.systemID}, {rtxd.TotalNativeOutConverted()});
+            //printf("cci:\n%s\n rtxd.ReserveInputMap():\n%s, rtxd.ReserveOutConvertedMap():\n%s\nReserveValueIn:\n%s\n", cci.ToUniValue().write(1, 2).c_str(), 
+            //    rtxd.ReserveInputMap().ToUniValue().write(1, 2).c_str(), rtxd.ReserveOutConvertedMap().ToUniValue().write(1, 2).c_str(),
+            //    ReserveValueIn.ToUniValue().write(1, 2).c_str());
         }
         else
         {
@@ -3516,7 +3517,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
         //fprintf(stderr,"checkblock failure in connectblock futureblock.%d\n",futureblock);
         return false;
     }
-    
+
     // verify that the view's current state corresponds to the previous block
     uint256 hashPrevBlock = pindex->pprev == NULL ? uint256() : pindex->pprev->GetBlockHash();
 
@@ -4079,7 +4080,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
 
         if (logicalTS <= prevLogicalTS) {
             logicalTS = prevLogicalTS + 1;
-            LogPrintf("%s: Previous logical timestamp is newer Actual[%d] prevLogical[%d] Logical[%d]\n", __func__, pindex->nTime, prevLogicalTS, logicalTS);
+            //LogPrintf("%s: Previous logical timestamp is newer Actual[%d] prevLogical[%d] Logical[%d]\n", __func__, pindex->nTime, prevLogicalTS, logicalTS);
         }
 
         if (!pblocktree->WriteTimestampIndex(CTimestampIndexKey(logicalTS, pindex->GetBlockHash())))
@@ -4114,7 +4115,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
 
         if (logicalTS <= prevLogicalTS) {
             logicalTS = prevLogicalTS + 1;
-            LogPrintf("%s: Previous logical timestamp is newer Actual[%d] prevLogical[%d] Logical[%d]\n", __func__, pindex->nTime, prevLogicalTS, logicalTS);
+            //LogPrintf("%s: Previous logical timestamp is newer Actual[%d] prevLogical[%d] Logical[%d]\n", __func__, pindex->nTime, prevLogicalTS, logicalTS);
         }
 
         if (!pblocktree->WriteTimestampIndex(CTimestampIndexKey(logicalTS, pindex->GetBlockHash())))
@@ -5541,9 +5542,10 @@ bool ContextualCheckBlock(
         std::vector<unsigned char> vch = block.nSolution;
         uint32_t ver = CVerusSolutionVector(vch).Version();
         // we let some V3's slip by, so enforce correct version for all versions after V3
-        if (ver < CActivationHeight::SOLUTION_VERUSV2 || (CConstVerusSolutionVector::GetVersionByHeight(nHeight) > CActivationHeight::SOLUTION_VERUSV3 && ver != CConstVerusSolutionVector::GetVersionByHeight(nHeight)))
+        int solutionVersion = CConstVerusSolutionVector::GetVersionByHeight(nHeight);
+        if (ver < CActivationHeight::SOLUTION_VERUSV2 || (solutionVersion > CActivationHeight::SOLUTION_VERUSV3 && ver != solutionVersion))
         {
-            return state.DoS(10, error("%s: block header has incorrect version", __func__), REJECT_INVALID, "incorrect-block-version");
+            return state.DoS(10, error("%s: block header has incorrect version %d, should be %d", __func__, ver, solutionVersion), REJECT_INVALID, "incorrect-block-version");
         }
     }
 
@@ -7542,8 +7544,8 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                     vRecv >> hash;
                     ss << ": hash " << hash.ToString();
                 }
-                LogPrint("net", "Reject %s\n", SanitizeString(ss.str()));
-                //printf("Reject message %s\n", SanitizeString(ss.str()).c_str());
+                LogPrint("net", "Reject %s\n", SanitizeString(ss.str()), SanitizeString(strReason));
+                //printf("Reject message %s\n%s\n", SanitizeString(ss.str()).c_str(), SanitizeString(strReason).c_str());
             } catch (const std::ios_base::failure&) {
                 // Avoid feedback loops by preventing reject messages from triggering a new reject message.
                 LogPrint("net", "Unparseable reject message received\n");
@@ -8418,7 +8420,13 @@ bool ProcessMessages(CNode* pfrom)
         try
         {
             //printf("processing message: %s, from %s\n", strCommand.c_str(), pfrom->addr.ToString().c_str());
+            std::vector<unsigned char> storedMessage(vRecv.begin(), vRecv.end());
             fRet = ProcessMessage(pfrom, strCommand, vRecv, msg.nTime);
+            //if (!fRet)
+            //{
+            //    printf("message error: %s, from %s\n---------------------\n%s\n", 
+            //           strCommand.c_str(), pfrom->addr.ToString().c_str(), HexBytes(storedMessage.data(), storedMessage.size()).c_str());
+            //}
             boost::this_thread::interruption_point();
         }
         catch (const std::ios_base::failure& e)
@@ -8447,10 +8455,12 @@ bool ProcessMessages(CNode* pfrom)
         } catch (...) {
             PrintExceptionContinue(NULL, "ProcessMessages()");
         }
-        
+
         if (!fRet)
+        {
             LogPrintf("%s(%s, %u bytes) FAILED peer=%d\n", __func__, SanitizeString(strCommand), nMessageSize, pfrom->id);
-        
+        }
+
         break;
     }
     
