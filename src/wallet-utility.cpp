@@ -10,11 +10,15 @@
 
 #include "komodo_defs.h"
 char ASSETCHAINS_SYMBOL[KOMODO_ASSETCHAIN_MAXLEN];
+std::string PBAAS_HOST;
+int32_t PBAAS_PORT;
+std::string PBAAS_USERPASS;
 bool PBAAS_TESTMODE;
 uint160 ASSETCHAINS_CHAINID;
 uint160 VERUS_CHAINID;
 std::string VERUS_CHAINNAME;
 int64_t MAX_MONEY = 200000000 * 100000000LL;
+int64_t MAX_SUPPLY = 50000000000LL * 100000000LL;
 uint64_t ASSETCHAINS_SUPPLY;
 uint16_t BITCOIND_RPCPORT = 7771;
 uint16_t ASSETCHAINS_P2PPORT,ASSETCHAINS_RPCPORT;
@@ -29,6 +33,18 @@ int32_t ASSETCHAINS_OVERWINTER = 227520;
 int32_t ASSETCHAINS_SAPLING = 227520;
 
 unsigned int MAX_BLOCK_SIGOPS = 20000;
+
+#include "pbaas/pbaas.h"
+
+struct CCcontract_info *CCinit(struct CCcontract_info *cp, uint8_t evalcode)
+{
+    return NULL;
+}
+CConnectedChains ConnectedChains;
+CCurrencyDefinition CConnectedChains::GetCachedCurrency(const uint160 &currencyID)
+{
+    return CCurrencyDefinition();
+}
 
 void show_help()
 {

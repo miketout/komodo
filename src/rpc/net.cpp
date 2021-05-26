@@ -62,7 +62,7 @@ UniValue ping(const UniValue& params, bool fHelp)
     return NullUniValue;
 }
 
-static void CopyNodeStats(std::vector<CNodeStats>& vstats)
+void CopyNodeStats(std::vector<CNodeStats>& vstats)
 {
     vstats.clear();
 

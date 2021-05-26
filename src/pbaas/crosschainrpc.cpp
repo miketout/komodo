@@ -222,7 +222,7 @@ UniValue RPCCallRoot(const string& strMethod, const UniValue& params, int timeou
     {
         return RPCCall(strMethod, params, PBAAS_USERPASS, PBAAS_PORT, PBAAS_HOST);
     }
-    else if (ReadConfigFile(PBAAS_TESTMODE ? "VRSCTEST" : "VRSC", settings, settingsmulti))
+    else if (ReadConfigFile(PBAAS_TESTMODE ? "vrsctest" : "VRSC", settings, settingsmulti))
     {
         PBAAS_USERPASS = settingsmulti.find("-rpcuser")->second[0] + ":" + settingsmulti.find("-rpcpassword")->second[0];
         PBAAS_PORT = atoi(settingsmulti.find("-rpcport")->second[0]);
@@ -234,87 +234,6 @@ UniValue RPCCallRoot(const string& strMethod, const UniValue& params, int timeou
         return RPCCall(strMethod, params, credentials, port, host, timeout);
     }
     return UniValue(UniValue::VNULL);
-}
-
-bool uni_get_bool(UniValue uv, bool def)
-{
-    try
-    {
-        if (uv.isStr())
-        {
-            std::string boolStr;
-            if ((boolStr = uni_get_str(uv, def ? "true" : "false")) == "true" || boolStr == "1")
-            {
-                return true;
-            }
-            else if (boolStr == "false" || boolStr == "0")
-            {
-                return false;
-            }
-            return def;
-        }
-        else if (uv.isNum())
-        {
-            return uv.get_int() != 0;
-        }
-        else
-        {
-            return uv.get_bool();
-        }
-        return false;
-    }
-    catch(const std::exception& e)
-    {
-        return def;
-    }
-}
-
-int32_t uni_get_int(UniValue uv, int32_t def)
-{
-    try
-    {
-        return uv.get_int();
-    }
-    catch(const std::exception& e)
-    {
-        return def;
-    }
-}
-
-int64_t uni_get_int64(UniValue uv, int64_t def)
-{
-    try
-    {
-        return uv.get_int64();
-    }
-    catch(const std::exception& e)
-    {
-        return def;
-    }
-}
-
-std::string uni_get_str(UniValue uv, std::string def)
-{
-    try
-    {
-        return uv.get_str();
-    }
-    catch(const std::exception& e)
-    {
-        return def;
-    }
-}
-
-std::vector<UniValue> uni_getValues(UniValue uv, std::vector<UniValue> def)
-{
-    try
-    {
-        return uv.getValues();
-    }
-    catch(const std::exception& e)
-    {
-        return def;
-    }
 }
 
 UniValue CCrossChainRPCData::ToUniValue() const
@@ -346,99 +265,269 @@ CNodeData::CNodeData(std::string netAddr, std::string paymentAddr) :
     nodeIdentity = GetDestinationID(DecodeDestination(paymentAddr));
 }
 
-uint160 CurrencyNameToChainID(std::string currencyStr)
+CIdentitySignature::CIdentitySignature(const UniValue &uni)
 {
-    std::string extraName;
+    try
+    {
+        version = uni_get_int(find_value(uni, "version"));
+        blockHeight = uni_get_int64(find_value(uni, "blockheight"));
+        UniValue sigs = find_value(uni, "signatures");
+        if (sigs.isArray() && sigs.size())
+        {
+            for (int i = 0; i < sigs.size(); i++)
+            {
+                signatures.insert(ParseHex(uni_get_str(sigs[i])));
+            }
+        }
+    }
+    catch(...)
+    {
+        version = VERSION_INVALID;
+    }
+}
+
+uint256 CIdentitySignature::IdentitySignatureHash(const std::vector<uint160> &vdxfCodes, 
+                                                  const std::vector<uint256> &statements, 
+                                                  const uint160 &systemID, 
+                                                  uint32_t blockHeight, 
+                                                  uint160 idID,
+                                                  const std::string &prefixString, 
+                                                  const uint256 &msgHash) const
+{
+    uint256 retVal;
+    if (version == VERSION_VERUSID)
+    {
+        CHashWriterSHA256 ss(SER_GETHASH, PROTOCOL_VERSION);
+
+        ss << prefixString;
+        ss << systemID;
+        ss << blockHeight;
+        ss << idID;
+        ss << msgHash;
+
+        retVal = ss.GetHash();
+    }
+    else
+    {
+        auto ss = CMMRNode<>::GetHashWriter();
+
+        if (vdxfCodes.size())
+        {
+            ss << vdxfCodes;
+        }
+        if (statements.size())
+        {
+            ss << statements;
+        }
+        ss << systemID;
+        ss << blockHeight;
+        ss << idID;
+        if (prefixString.size())
+        {
+            ss << prefixString;
+        }
+        ss << msgHash;
+        retVal = ss.GetHash();
+    }
+    return retVal;
+}
+
+CIdentitySignature::ESignatureVerification CIdentitySignature::CheckSignature(const CIdentity &signingID,
+                                                                              const std::vector<uint160> &vdxfCodes, 
+                                                                              const std::vector<uint256> &statements, 
+                                                                              const uint160 systemID, 
+                                                                              const std::string &prefixString, 
+                                                                              const uint256 &msgHash) const
+{
+    CPubKey checkKey;
+    std::set<uint160> keys;
+    std::set<uint160> idKeys;
+    for (auto &oneKey : signingID.primaryAddresses)
+    {
+        // we currently only support secp256k1 signatures
+        if (oneKey.which() != COptCCParams::ADDRTYPE_PK && oneKey.which() != COptCCParams::ADDRTYPE_PKH)
+        {
+            return SIGNATURE_INVALID;
+        }
+        idKeys.insert(GetDestinationID(oneKey));
+    }
+    uint256 signatureHash = IdentitySignatureHash(vdxfCodes, statements, systemID, blockHeight, signingID.GetID(), prefixString, msgHash);
+    for (auto &oneSig : signatures)
+    {
+        if (oneSig.size() != ECDSA_RECOVERABLE_SIZE)
+        {
+            return SIGNATURE_INVALID;
+        }
+        if (!checkKey.RecoverCompact(signatureHash, oneSig))
+        {
+            return SIGNATURE_INVALID;
+        }
+        uint160 checkKeyID = checkKey.GetID();
+        if (!idKeys.count(checkKeyID))
+        {
+            return SIGNATURE_INVALID;
+        }
+        keys.insert(checkKey.GetID());
+    }
+    if (keys.size() >= signingID.minSigs)
+    {
+        return SIGNATURE_COMPLETE;
+    }
+    else if (keys.size())
+    {
+        return SIGNATURE_PARTIAL;
+    }
+    else
+    {
+        return SIGNATURE_INVALID;
+    }
+}
+
+uint160 DecodeCurrencyName(std::string currencyStr)
+{
     uint160 retVal;
     currencyStr = TrimSpaces(currencyStr);
     if (!currencyStr.size())
     {
         return retVal;
     }
-    ParseSubNames(currencyStr, extraName, true);
-    if (currencyStr.back() == '@' || (extraName != VERUS_CHAINNAME && extraName != ""))
+    if (currencyStr.back() == '@')
     {
         return retVal;
+    }
+    std::string copyStr = currencyStr;
+    uint160 parent;
+    currencyStr = CleanName(currencyStr, parent, true);
+    if (!parent.IsNull() && CCurrencyDefinition::GetID(currencyStr, parent) == ASSETCHAINS_CHAINID)
+    {
+        return ASSETCHAINS_CHAINID;
     }
     CTxDestination currencyDest = DecodeDestination(currencyStr);
     if (currencyDest.which() == COptCCParams::ADDRTYPE_INVALID)
     {
-        currencyDest = DecodeDestination(currencyStr + "@");
+        currencyDest = DecodeDestination(copyStr + "@");
     }
     if (currencyDest.which() != COptCCParams::ADDRTYPE_INVALID)
     {
-        retVal = GetDestinationID(currencyDest);
+        return GetDestinationID(currencyDest);
     }
     return retVal;
 }
 
 CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj) :
     preLaunchDiscount(0),
-    initialFractionalSupply(0)
+    initialFractionalSupply(0),
+    gatewayConverterIssuance(0),
+    minNotariesConfirm(0),
+    idRegistrationFees(IDENTITY_REGISTRATION_FEE),
+    idReferralLevels(DEFAULT_ID_REFERRAL_LEVELS),
+    idImportFees(IDENTITY_IMPORT_FEE),
+    currencyRegistrationFee(CURRENCY_REGISTRATION_FEE),
+    pbaasSystemLaunchFee(PBAAS_SYSTEM_LAUNCH_FEE),
+    currencyImportFee(CURRENCY_IMPORT_FEE),
+    transactionImportFee(TRANSACTION_TRANSFER_FEE >> 1),
+    transactionExportFee(TRANSACTION_TRANSFER_FEE >> 1)
 {
     try
     {
-        nVersion = PBAAS_VERSION;
+        nVersion = uni_get_int64(find_value(obj, "version"), VERSION_CURRENT);
+        options = (uint32_t)uni_get_int64(find_value(obj, "options"));
         name = std::string(uni_get_str(find_value(obj, "name")), 0, (KOMODO_ASSETCHAIN_MAXLEN - 1));
 
         std::string parentStr = uni_get_str(find_value(obj, "parent"));
         if (parentStr != "")
         {
-            CTxDestination parentDest = DecodeDestination(parentStr);
-            parent = GetDestinationID(parentDest);
-            // if we have a destination, but it is invalid, the json for this definition cannot be valid
-            if (parentDest.which() == COptCCParams::ADDRTYPE_INVALID)
+            parent = DecodeCurrencyName(parentStr);
+            if (parent.IsNull())
             {
+                LogPrintf("%s: invalid parent for currency: %s\n", __func__, parentStr.c_str());
                 nVersion = PBAAS_VERSION_INVALID;
+                return;
             }
         }
 
         name = CleanName(name, parent);
 
-        options = (uint32_t)uni_get_int64(find_value(obj, "options"));
-
-        idRegistrationAmount = AmountFromValueNoErr(find_value(obj, "idregistrationprice"));
-        idReferralLevels = uni_get_int(find_value(obj, "idreferrallevels"));
-
-        UniValue notaryArr = find_value(obj, "notaries");
-        minNotariesConfirm = 0;
-        if (notaryArr.isArray())
+        std::string systemIDStr = uni_get_str(find_value(obj, "systemid"));
+        if (systemIDStr != "")
         {
-            for (int i = 0; i < notaryArr.size(); i++)
+            systemID = DecodeCurrencyName(systemIDStr);
+            // if we have a system, but it is invalid, the json for this definition cannot be valid
+            if (systemID.IsNull())
             {
-                CIdentityID notaryID;
-                CTxDestination notaryDest = DecodeDestination(uni_get_str(notaryArr[i]));
-                notaryID = GetDestinationID(notaryDest);
-                // if we have a destination, but it is invalid, the json for this definition cannot be valid
-                if (notaryID.IsNull())
-                {
-                    nVersion = PBAAS_VERSION_INVALID;
-                }
-                else
-                {
-                    notaries.push_back(notaryID);
-                }
+                nVersion = PBAAS_VERSION_INVALID;
+                return;
             }
-            minNotariesConfirm = uni_get_int(find_value(obj, "minnotariesconfirm"));
         }
-        billingPeriod = uni_get_int(find_value(obj, "billingperiod"));
-        notarizationReward = AmountFromValueNoErr(find_value(obj, "notarizationreward"));
+        else
+        {
+            systemID = parent;
+        }
 
-        startBlock = uni_get_int(find_value(obj, "startblock"));
-        endBlock = uni_get_int(find_value(obj, "endblock"));
+        gatewayConverterName = uni_get_str(find_value(obj, "gatewayconvertername"));
+        if (!gatewayConverterName.empty())
+        {
+            if (!(IsPBaaSChain() || IsGateway()) || (IsPBaaSChain() && IsGateway()))
+            {
+                LogPrintf("%s: a gateway converter currency may only be defined as part of a gateway or PBaaS system definition\n", __func__);
+                nVersion = PBAAS_VERSION_INVALID;
+                return;
+            }
+            else if (IsGateway())
+            {
+                gatewayID = GetID();
+            }
+            uint160 parent = GetID();
+            std::string cleanGatewayName = CleanName(gatewayConverterName, parent, true);
+            uint160 converterID = GetID(cleanGatewayName, parent);
+            if (parent != GetID())
+            {
+                LogPrintf("%s: invalid name for gateway converter %s\n", __func__, cleanGatewayName.c_str());
+                nVersion = PBAAS_VERSION_INVALID;
+                return;
+            }
+        }
 
+        if (IsPBaaSChain() || IsGateway() || IsPBaaSConverter())
+        {
+            gatewayConverterIssuance = AmountFromValueNoErr(find_value(obj, "gatewayconverterissuance"));
+        }
+
+        notarizationProtocol = (ENotarizationProtocol)uni_get_int(find_value(obj, "notarizationprotocol"), (int32_t)NOTARIZATION_NOTARY_CONFIRM);
+        if (notarizationProtocol != NOTARIZATION_NOTARY_CONFIRM && !(IsToken() && notarizationProtocol == NOTARIZATION_AUTO))
+        {
+            LogPrintf("%s: notarization protocol for PBaaS chains must be %d (NOTARIZATION_NOTARY_CONFIRM) at this time\n", __func__, (int)NOTARIZATION_NOTARY_CONFIRM);
+            nVersion = PBAAS_VERSION_INVALID;
+            return;
+        }
         proofProtocol = (EProofProtocol)uni_get_int(find_value(obj, "proofprotocol"), (int32_t)PROOF_PBAASMMR);
-        if (proofProtocol != PROOF_PBAASMMR && proofProtocol != PROOF_CHAINID)
+        if (proofProtocol != PROOF_PBAASMMR && proofProtocol != PROOF_CHAINID && proofProtocol != PROOF_ETHNOTARIZATION)
         {
-            LogPrintf("%s: proofprotocol must be either %d or %d\n", __func__, (int)PROOF_PBAASMMR, (int)PROOF_CHAINID);
+            LogPrintf("%s: proofprotocol must be %d, %d, or %d\n", __func__, (int)PROOF_PBAASMMR, (int)PROOF_CHAINID, (int)PROOF_ETHNOTARIZATION);
             nVersion = PBAAS_VERSION_INVALID;
+            return;
         }
-        notarizationProtocol = (ENotarizationProtocol)uni_get_int(find_value(obj, "notarizationprotocol"), (int32_t)NOTARIZATION_AUTO);
-        if (notarizationProtocol != NOTARIZATION_AUTO)
+
+        nativeCurrencyID = CTransferDestination(find_value(obj, "nativecurrencyid"));
+
+        std::string launchIDStr = uni_get_str(find_value(obj, "launchsystemid"));
+        if (launchIDStr != "")
         {
-            LogPrintf("%s: notarization protocol must be %d at this time\n", __func__, (int)NOTARIZATION_AUTO);
-            nVersion = PBAAS_VERSION_INVALID;
+            launchSystemID = DecodeCurrencyName(launchIDStr);
+            // if we have a system, but it is invalid, the json for this definition cannot be valid
+            if (launchSystemID.IsNull())
+            {
+                nVersion = PBAAS_VERSION_INVALID;
+                return;
+            }
         }
+        else
+        {
+            launchSystemID = parent;
+        }
+
+        startBlock = (uint32_t)uni_get_int64(find_value(obj, "startblock"));
+        endBlock = (uint32_t)uni_get_int64(find_value(obj, "endblock"));
 
         int32_t totalReserveWeight = IsFractional() ? SATOSHIDEN : 0;
         UniValue currencyArr = find_value(obj, "currencies");
@@ -464,50 +553,7 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj) :
                     nVersion = PBAAS_VERSION_INVALID;
                 }
 
-                UniValue preLaunchCarveoutsUni = find_value(obj, "prelaunchcarveouts");
-                int32_t preLaunchCarveOutTotal = 0;
-                if (nVersion != PBAAS_VERSION_INVALID && preLaunchCarveoutsUni.isArray())
-                {
-                    for (int i = 0; i < preLaunchCarveoutsUni.size(); i++)
-                    {
-                        std::vector<std::string> preLaunchCarveOutKey = preLaunchCarveoutsUni[i].getKeys();
-                        std::vector<UniValue> preLaunchCarveOutValue = preLaunchCarveoutsUni[i].getValues();
-                        if (preLaunchCarveOutKey.size() != 1 || preLaunchCarveOutValue.size() != 1)
-                        {
-                            LogPrintf("%s: each prelaunchcarveouts entry must contain one destination identity and one amount\n", __func__);
-                            printf("%s: each prelaunchcarveouts entry must contain one destination identity and one amount\n", __func__);
-                            nVersion = PBAAS_VERSION_INVALID;
-                            break;
-                        }
-
-                        CTxDestination carveOutDest = DecodeDestination(preLaunchCarveOutKey[0]);
-
-                        if (carveOutDest.which() != COptCCParams::ADDRTYPE_ID && !(carveOutDest.which() == COptCCParams::ADDRTYPE_INVALID && preLaunchCarveoutsUni.size() == 1))
-                        {
-                            LogPrintf("%s: prelaunchcarveouts destination must be an identity\n", __func__);
-                            nVersion = PBAAS_VERSION_INVALID;
-                            break;
-                        }
-
-                        CAmount carveOutAmount = AmountFromValueNoErr(preLaunchCarveOutValue[0]);
-                        if (carveOutAmount <= 0)
-                        {
-                            LogPrintf("%s: prelaunchcarveouts values must be greater than zero\n", __func__);
-                            nVersion = PBAAS_VERSION_INVALID;
-                            break;
-                        }
-                        preLaunchCarveOutTotal += carveOutAmount;
-                        if (preLaunchDiscount < 0 || 
-                            preLaunchDiscount >= SATOSHIDEN ||
-                            CCurrencyDefinition::CalculateRatioOfValue((totalReserveWeight - preLaunchCarveOutTotal), SATOSHIDEN - preLaunchDiscount) >= SATOSHIDEN)
-                        {
-                            LogPrintf("%s: prelaunchcarveouts values and discounts must total less than 1\n", __func__);
-                            nVersion = PBAAS_VERSION_INVALID;
-                            break;
-                        }
-                        preLaunchCarveOuts.push_back(make_pair(CIdentityID(GetDestinationID(carveOutDest)), preLaunchCarveOutTotal));
-                    }
-                }
+                preLaunchCarveOut = AmountFromValueNoErr(find_value(obj, "prelaunchcarveout"));
 
                 // if weights are defined, use them as relative ratios of each member currency
                 if (weightArr.isArray() && weightArr.size())
@@ -581,13 +627,13 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj) :
             {
                 // if we are fractional, explicit conversion values are not valid
                 // and are based on non-zero, initial contributions relative to supply
-                if ((conversionArr.isArray() && conversionArr.size()) ||
+                if ((conversionArr.isArray() && conversionArr.size() != currencyArr.size()) ||
                     !initialContributionArr.isArray() || 
                     initialContributionArr.size() != currencyArr.size() ||
                     weights.size() != currencyArr.size() ||
                     !IsFractional())
                 {
-                    LogPrintf("%s: reserve currencies must have weights, initial contributions in every currency, and no explicit conversion rates\n", __func__);
+                    LogPrintf("%s: reserve currencies must have weights, initial contributions in at least one currency\n", __func__);
                     nVersion = PBAAS_VERSION_INVALID;
                 }
             }
@@ -633,17 +679,11 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj) :
             bool isInitialContributions = initialContributionArr.isArray() && initialContributionArr.size();
             bool isPreconvertMin = minPreconvertArr.isArray() && minPreconvertArr.size();
             bool isPreconvertMax = maxPreconvertArr.isArray() && maxPreconvertArr.size();
-            bool explicitConversions = conversionArr.isArray() && conversionArr.size();
-
-            if (IsFractional() && explicitConversions)
-            {
-                LogPrintf("%s: cannot specify explicit conversion values for reserve currencies\n", __func__);
-                nVersion = PBAAS_VERSION_INVALID;
-            }
+            bool explicitConversions = (!IsFractional() && conversionArr.isArray()) && conversionArr.size();
 
             for (int i = 0; nVersion != PBAAS_VERSION_INVALID && i < currencyArr.size(); i++)
             {
-                uint160 currencyID = CurrencyNameToChainID(uni_get_str(currencyArr[i]));
+                uint160 currencyID = DecodeCurrencyName(uni_get_str(currencyArr[i]));
                 // if we have a destination, but it is invalid, the json for this definition cannot be valid
                 if (currencyID.IsNull())
                 {
@@ -658,12 +698,6 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj) :
                 if (isInitialContributions && i < initialContributionArr.size())
                 {
                     int64_t contrib = AmountFromValueNoErr(initialContributionArr[i]);
-                    if (IsFractional() && contrib < MIN_RESERVE_CONTRIBUTION)
-                    {
-                        LogPrintf("%s: all fractional reserve currencies must start with %s minimum initial contribution in each currency\n", __func__, ValueFromAmount(MIN_RESERVE_CONTRIBUTION).write().c_str());
-                        nVersion = PBAAS_VERSION_INVALID;
-                        break;
-                    }
                     contributions[i] = contrib;
                     preconverted[i] = contrib;
                 }
@@ -744,18 +778,64 @@ CCurrencyDefinition::CCurrencyDefinition(const UniValue &obj) :
             }
         }
 
+        UniValue notaryArr = find_value(obj, "notaries");
+        minNotariesConfirm = 0;
+        if (notaryArr.isArray())
+        {
+            for (int i = 0; i < notaryArr.size(); i++)
+            {
+                CIdentityID notaryID;
+                CTxDestination notaryDest = DecodeDestination(uni_get_str(notaryArr[i]));
+                notaryID = GetDestinationID(notaryDest);
+                // if we have a destination, but it is invalid, the json for this definition cannot be valid
+                if (notaryID.IsNull())
+                {
+                    nVersion = PBAAS_VERSION_INVALID;
+                }
+                else
+                {
+                    notaries.push_back(notaryID);
+                }
+            }
+            minNotariesConfirm = uni_get_int(find_value(obj, "minnotariesconfirm"));
+        }
+
+        idRegistrationFees = uni_get_int64(find_value(obj, "idregistrationfees"), idRegistrationFees);
+        idReferralLevels = uni_get_int(find_value(obj, "idreferrallevels"), idReferralLevels);
+        idImportFees = uni_get_int64(find_value(obj, "idimportfees"), idImportFees);
+
         auto vEras = uni_getValues(find_value(obj, "eras"));
         if (vEras.size() > ASSETCHAINS_MAX_ERAS)
         {
             vEras.resize(ASSETCHAINS_MAX_ERAS);
         }
 
-        for (auto era : vEras)
+        if (vEras.size())
         {
-            rewards.push_back(uni_get_int64(find_value(era, "reward")));
-            rewardsDecay.push_back(uni_get_int64(find_value(era, "decay")));
-            halving.push_back(uni_get_int64(find_value(era, "halving")));
-            eraEnd.push_back(uni_get_int64(find_value(era, "eraend")));
+            currencyRegistrationFee = uni_get_int64(find_value(obj, "currencyregistrationfee"), currencyRegistrationFee);
+            pbaasSystemLaunchFee = uni_get_int64(find_value(obj, "pbaassystemregistrationfee"), pbaasSystemLaunchFee);
+            currencyImportFee = uni_get_int64(find_value(obj, "currencyimportfee"), currencyImportFee);
+            transactionImportFee = uni_get_int64(find_value(obj, "transactionimportfee"), transactionImportFee);
+            transactionExportFee = uni_get_int64(find_value(obj, "transactionexportfee"), transactionExportFee);
+
+            if (!gatewayID.IsNull())
+            {
+                gatewayConverterIssuance = uni_get_int64(find_value(obj, "gatewayconverterissuance"));
+            }
+
+            for (auto era : vEras)
+            {
+                rewards.push_back(uni_get_int64(find_value(era, "reward")));
+                rewardsDecay.push_back(uni_get_int64(find_value(era, "decay")));
+                halving.push_back(uni_get_int64(find_value(era, "halving")));
+                eraEnd.push_back(uni_get_int64(find_value(era, "eraend")));
+            }
+
+            if (!rewards.size())
+            {
+                LogPrintf("%s: PBaaS chain does not have valid rewards eras");
+                nVersion = PBAAS_VERSION_INVALID;
+            }
         }
     }
     catch (exception e)
@@ -788,53 +868,18 @@ int64_t CCurrencyDefinition::GetTotalPreallocation() const
 // this will only return an accurate result after total preconversion has been updated and before any emission
 int32_t CCurrencyDefinition::GetTotalCarveOut() const
 {
-    int32_t totalCarveOut = 0;
-    for (auto &oneCarveOut : preLaunchCarveOuts)
-    {
-        totalCarveOut += oneCarveOut.second;
-        if (oneCarveOut.second < 0 || oneCarveOut.second > SATOSHIDEN || totalCarveOut > SATOSHIDEN)
-        {
-            LogPrintf("%s: invalid carve out amount specified %d\n", __func__, oneCarveOut.second);
-            return 0;
-        }
-    }
-    return totalCarveOut;
+    return preLaunchCarveOut;
 }
 
-std::vector<std::pair<uint160, int64_t>> CCurrencyDefinition::GetPreAllocationAmounts() const
+CAmount AmountFromValue(const UniValue& value)
 {
-    if (!preLaunchDiscount)
-    {
-        return preAllocation;
-    }
-    if (preLaunchDiscount >= SATOSHIDEN)
-    {
-        return std::vector<std::pair<uint160, int64_t>>();
-    }
-    int64_t totalPreAllocation = GetTotalPreallocation();
-    int64_t totalPreAllocUnits = 0;
-    for (auto &onePreAlloc : preAllocation)
-    {
-        totalPreAllocUnits += onePreAlloc.second;
-    }
-    static arith_uint256 bigSatoshi(SATOSHIDEN);
-
-    std::vector<std::pair<uint160, int64_t>> retVal(preAllocation.size());
-    for (int i = 0; i < preAllocation.size(); i++)
-    {
-        if (i == preAllocation.size() - 1)
-        {
-            retVal[i] = make_pair(preAllocation[i].first, totalPreAllocation);
-        }
-        else
-        {
-            CAmount subRatio = ((arith_uint256(preAllocation[i].second) * bigSatoshi) / totalPreAllocUnits).GetLow64();
-            CAmount thisPreAlloc = CalculateRatioOfValue(totalPreAllocation, subRatio);
-            retVal[i] = make_pair(preAllocation[i].first, thisPreAlloc);
-            totalPreAllocation -= thisPreAlloc;
-        }
-    }
-    return retVal;
+    if (!value.isNum() && !value.isStr())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Amount is not a number or string");
+    CAmount amount;
+    if (!ParseFixedPoint(value.getValStr(), 8, &amount))
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount");
+    if (!MoneyRange(amount))
+        throw JSONRPCError(RPC_TYPE_ERROR, "Amount out of range");
+    return amount;
 }
-
 

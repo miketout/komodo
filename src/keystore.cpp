@@ -226,7 +226,7 @@ bool CBasicKeyStore::GetIdentity(const CIdentityMapKey &keyStart, const CIdentit
     return true;
 }
 
-bool CBasicKeyStore::GetIdentity(const CIdentityMapKey &mapKey, const uint256 &txid, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity)
+bool CBasicKeyStore::GetIdentity(const CIdentityMapKey &mapKey, const uint256 &txid, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity) const
 {
     CIdentityMapKey localKey = mapKey;
     std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> toCheck;
@@ -276,9 +276,65 @@ bool CBasicKeyStore::GetPriorIdentity(const CIdentityMapKey &idMapKey, std::pair
     return true;
 }
 
+bool CBasicKeyStore::GetIdentities(const std::vector<uint160> &queryList,
+                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &mine, 
+                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &imsigner, 
+                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &notmine) const
+{
+    std::set<CIdentityID> identitySet;
+
+    for (auto &identity : queryList)
+    {
+        identitySet.insert(identity);
+    }
+
+    for (auto &idID : identitySet)
+    {
+        std::pair<CIdentityMapKey, CIdentityMapValue> primaryIdentity;
+        if (GetIdentity(idID, primaryIdentity))
+        {
+            std::pair<CIdentityMapKey, CIdentityMapValue> revocationAuthority;
+            std::pair<CIdentityMapKey, CIdentityMapValue> recoveryAuthority;
+
+            CIdentityMapKey idKey(primaryIdentity.first);
+
+            // consider our canspend and cansign on revocation and recovery
+            if (!primaryIdentity.second.IsRevoked() && primaryIdentity.second.revocationAuthority != idID)
+            {
+                if (GetIdentity(primaryIdentity.second.revocationAuthority, revocationAuthority))
+                {
+                    idKey.flags |= (CIdentityMapKey(revocationAuthority.first).flags & (idKey.CAN_SPEND | idKey.CAN_SIGN));
+                }
+            }
+
+            if (primaryIdentity.second.IsRevoked() && primaryIdentity.second.recoveryAuthority != idID)
+            {
+                if (GetIdentity(primaryIdentity.second.recoveryAuthority, recoveryAuthority))
+                {
+                    idKey.flags |= (CIdentityMapKey(recoveryAuthority.first).flags & (idKey.CAN_SPEND | idKey.CAN_SIGN));
+                }
+            }
+
+            if (idKey.flags & idKey.CAN_SPEND)
+            {
+                mine.push_back(make_pair(idKey, primaryIdentity.second));
+            }
+            else if (idKey.flags & idKey.CAN_SIGN)
+            {
+                imsigner.push_back(make_pair(idKey, primaryIdentity.second));
+            }
+            else
+            {
+                notmine.push_back(make_pair(idKey, primaryIdentity.second));
+            }
+        }
+    }
+    return (mine.size() || imsigner.size() || notmine.size());
+}
+
 bool CBasicKeyStore::GetIdentities(std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &mine, 
                                    std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &imsigner, 
-                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &notmine)
+                                   std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &notmine) const
 {
     std::set<CIdentityID> identitySet;
 

@@ -176,14 +176,10 @@ public:
         assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
         vFixedSeeds.clear();
         vSeeds.clear();
-        vSeeds.push_back(CDNSSeedData("veruscoin.io", "seeds.veruscoin.io")); // @kolo - old static dns seeds
-        vSeeds.push_back(CDNSSeedData("komodoplatform.com", "seeds.komodoplatform.com")); // @kolo - old static dns seeds
-        vSeeds.push_back(CDNSSeedData("kolo.supernet.org", "static.kolo.supernet.org")); // @kolo - new static dns seeds ToDo
-        vSeeds.push_back(CDNSSeedData("kolo.supernet.org", "dynamic.kolo.supernet.org")); // @kolo - crawler seeds ToDo
-        // TODO: set up bootstrapping for mainnet
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,60);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,85);
         base58Prefixes[IDENTITY_ADDRESS] = std::vector<unsigned char>(1,102);
+        base58Prefixes[INDEX_ADDRESS] = std::vector<unsigned char>(1,137);
         base58Prefixes[QUANTUM_ADDRESS] = std::vector<unsigned char>(1,58);
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,188);
         base58Prefixes[EXT_PUBLIC_KEY] = boost::assign::list_of(0x04)(0x88)(0xB2)(0x1E).convert_to_container<std::vector<unsigned char> >();
@@ -279,8 +275,13 @@ void *chainparams_commandline(void *ptr)
         }
 
         // only require coinbase protection on Verus from the Komodo family of coins
-        if (strcmp(ASSETCHAINS_SYMBOL,"VRSC") == 0)
+        if (_IsVerusMainnetActive())
         {
+            mainParams.vSeeds.push_back(CDNSSeedData("veruscoin.io", "seeds.veruscoin.io"));
+            mainParams.vSeeds.push_back(CDNSSeedData("komodoplatform.com", "seeds.komodoplatform.com")); // @kolo - old static dns seeds
+            mainParams.vSeeds.push_back(CDNSSeedData("kolo.supernet.org", "static.kolo.supernet.org")); // @kolo - new static dns seeds ToDo
+            mainParams.vSeeds.push_back(CDNSSeedData("kolo.supernet.org", "dynamic.kolo.supernet.org")); // @kolo - crawler seeds ToDo
+
             mainParams.consensus.vUpgrades[Consensus::UPGRADE_SAPLING].nActivationHeight = 227520;
             mainParams.consensus.vUpgrades[Consensus::UPGRADE_OVERWINTER].nActivationHeight = 227520;
             checkpointData = //(Checkpoints::CCheckpointData)
@@ -303,18 +304,24 @@ void *chainparams_commandline(void *ptr)
         }
         else
         {
+            mainParams.vSeeds.clear();
+            if (_IsVerusActive())
+            {
+                mainParams.vFixedSeeds = std::vector<SeedSpec6>(pnSeed6_test, pnSeed6_test + ARRAYLEN(pnSeed6_test));
+                mainParams.vSeeds.push_back(CDNSSeedData("veruscoin.io", "seeds.veruscoin.io"));
+            }
             mainParams.consensus.nMinimumChainWork = uint256S("0x0000000000000000000000000000000000000000000000000000000000000020");
             mainParams.consensus.vUpgrades[Consensus::UPGRADE_SAPLING].nActivationHeight = ASSETCHAINS_SAPLING;
             mainParams.consensus.vUpgrades[Consensus::UPGRADE_OVERWINTER].nActivationHeight = ASSETCHAINS_OVERWINTER;
             checkpointData = //(Checkpoints::CCheckpointData)
-                {
-                    boost::assign::map_list_of
-                    (0, mainParams.consensus.hashGenesisBlock),
-                    (int64_t)1231006505,
-                    (int64_t)1,
-                    (double)2777            // * estimated number of transactions per day after checkpoint
-                                            //   total number of tx / (checkpoint block height / (24 * 24))
-                };
+            {
+                boost::assign::map_list_of
+                (0, mainParams.consensus.hashGenesisBlock),
+                (int64_t)1231006505,
+                (int64_t)1,
+                (double)2777            // * estimated number of transactions per day after checkpoint
+                                        //   total number of tx / (checkpoint block height / (24 * 24))
+            };
         }
     }
     else
@@ -549,6 +556,7 @@ public:
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,0);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,5);
         base58Prefixes[IDENTITY_ADDRESS] = std::vector<unsigned char>(1,102);
+        base58Prefixes[INDEX_ADDRESS] = std::vector<unsigned char>(1,137);
         base58Prefixes[QUANTUM_ADDRESS] = std::vector<unsigned char>(1,58);
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,128);
         base58Prefixes[EXT_PUBLIC_KEY] = boost::assign::list_of(0x04)(0x35)(0x87)(0xCF).convert_to_container<std::vector<unsigned char> >();
@@ -704,6 +712,7 @@ public:
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,60);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,85);
         base58Prefixes[IDENTITY_ADDRESS] = std::vector<unsigned char>(1,102);
+        base58Prefixes[INDEX_ADDRESS] = std::vector<unsigned char>(1,137);
         base58Prefixes[QUANTUM_ADDRESS] = std::vector<unsigned char>(1,58);
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,188);
         //base58Prefixes[PUBKEY_ADDRESS]     = {0x1D,0x25};

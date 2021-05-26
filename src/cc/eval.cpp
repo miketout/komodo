@@ -80,7 +80,7 @@ bool Eval::Dispatch(const CC *cond, const CTransaction &txTo, unsigned int nIn, 
     switch ( ecode )
     {
         case EVAL_CURRENCY_DEFINITION:
-        case EVAL_SERVICEREWARD:
+        case EVAL_NOTARY_EVIDENCE:
         case EVAL_EARNEDNOTARIZATION:
         case EVAL_ACCEPTEDNOTARIZATION:
         case EVAL_FINALIZE_NOTARIZATION:
@@ -92,6 +92,7 @@ bool Eval::Dispatch(const CC *cond, const CTransaction &txTo, unsigned int nIn, 
         case EVAL_CROSSCHAIN_IMPORT:
         case EVAL_CURRENCYSTATE:
         case EVAL_FINALIZE_EXPORT:
+        case EVAL_FEE_POOL:
             if (!chainActive.LastTip() || CConstVerusSolutionVector::activationHeight.ActiveVersion(chainActive.LastTip()->GetHeight() + 1) < CActivationHeight::ACTIVATE_PBAAS)
             {
                 // if chain is not able to process this yet, don't drop through to do so

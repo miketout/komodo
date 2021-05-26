@@ -251,6 +251,9 @@ class CChainPower
         {
             return !(p1 < p2);
         }
+
+        uint256 CompactChainPower() const;
+        static CChainPower ExpandCompactPower(uint256 compactPower, uint32_t height = 0);
 };
 
 /** The block chain is a tree shaped structure starting with the
@@ -776,7 +779,5 @@ public:
     /** Find the last common block between this chain and a block index entry. */
     const CBlockIndex *FindFork(const CBlockIndex *pindex) const;
 };
-
-CChainPower ExpandCompactPower(uint256 compactPower, uint32_t height = 0);
 
 #endif // BITCOIN_CHAIN_H

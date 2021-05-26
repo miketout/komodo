@@ -12,17 +12,19 @@
 #include <pubkey.h>
 #include <zcash/Address.hpp>
 #include <zcash/zip32.h>
+#include <pbaas/vdxf.h>
 
 #include <string>
 
 extern CIdentityID VERUS_DEFAULTID;
+extern CIdentityID VERUS_NOTARYID;
+extern uint160 VERUS_NODEID;
+extern int32_t MAX_UTXOS_ID_RESCAN;
+extern int32_t MAX_OUR_UTXOS_ID_RESCAN;
 extern bool VERUS_PRIVATECHANGE;
 extern std::string VERUS_DEFAULT_ZADDR;
 
-std::string TrimLeading(const std::string &Name, unsigned char ch);
-std::string TrimTrailing(const std::string &Name, unsigned char ch);
-std::string TrimSpaces(const std::string &Name);
-
+std::vector<std::string> ParseSubNames(const std::string &Name, std::string &ChainOut, bool displayfilter=false, bool addVerus=true);
 CKey DecodeSecret(const std::string& str);
 std::string EncodeSecret(const CKey& key);
 

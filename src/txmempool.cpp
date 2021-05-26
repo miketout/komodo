@@ -161,14 +161,22 @@ void CTxMemPool::addAddressIndex(const CTxMemPoolEntry &entry, const CCoinsViewC
                 {
                     dests = prevout.scriptPubKey.GetDestinations();
                 }
+
+                uint32_t nHeight = chainActive.Height();
+                std::map<uint160, uint32_t> heightOffsets = p.GetIndexHeightOffsets(chainActive.Height());
+
                 for (auto dest : dests)
                 {
                     if (dest.which() != COptCCParams::ADDRTYPE_INVALID)
                     {
-                        CMempoolAddressDeltaKey key(AddressTypeFromDest(dest), GetDestinationID(dest), txhash, j, 1);
-                        CMempoolAddressDelta delta(entry.GetTime(), prevout.nValue * -1, input.prevout.hash, input.prevout.n);
-                        mapAddress.insert(make_pair(key, delta));
-                        inserted.push_back(key);
+                        uint160 destID = GetDestinationID(dest);
+                        if (!(dest.which() == COptCCParams::ADDRTYPE_INDEX && heightOffsets.count(destID) && heightOffsets[destID] != nHeight))
+                        {
+                            CMempoolAddressDeltaKey key(AddressTypeFromDest(dest), destID, txhash, j, 1);
+                            CMempoolAddressDelta delta(entry.GetTime(), prevout.nValue * -1, input.prevout.hash, input.prevout.n);
+                            mapAddress.insert(make_pair(key, delta));
+                            inserted.push_back(key);
+                        }
                     }
                 }
             }
@@ -201,13 +209,21 @@ void CTxMemPool::addAddressIndex(const CTxMemPoolEntry &entry, const CCoinsViewC
             {
                 dests = out.scriptPubKey.GetDestinations();
             }
+
+            uint32_t nHeight = chainActive.Height();
+            std::map<uint160, uint32_t> heightOffsets = p.GetIndexHeightOffsets(nHeight);
+
             for (auto dest : dests)
             {
                 if (dest.which() != COptCCParams::ADDRTYPE_INVALID)
                 {
-                    CMempoolAddressDeltaKey key(AddressTypeFromDest(dest), GetDestinationID(dest), txhash, j, 0);
-                    mapAddress.insert(make_pair(key, CMempoolAddressDelta(entry.GetTime(), out.nValue)));
-                    inserted.push_back(key);
+                    uint160 destID = GetDestinationID(dest);
+                    if (!(dest.which() == COptCCParams::ADDRTYPE_INDEX && heightOffsets.count(destID) && heightOffsets[destID] > nHeight))
+                    {
+                        CMempoolAddressDeltaKey key(AddressTypeFromDest(dest), GetDestinationID(dest), txhash, j, 0);
+                        mapAddress.insert(make_pair(key, CMempoolAddressDelta(entry.GetTime(), out.nValue)));
+                        inserted.push_back(key);
+                    }
                 }
             }
         }

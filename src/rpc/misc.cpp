@@ -80,7 +80,6 @@ UniValue getinfo(const UniValue& params, bool fHelp)
             "  \"version\": xxxxx,           (numeric) the server version\n"
             "  \"protocolversion\": xxxxx,   (numeric) the protocol version\n"
             "  \"walletversion\": xxxxx,     (numeric) the wallet version\n"
-            "  \"balance\": xxxxxxx,         (numeric) the total Komodo balance of the wallet\n"
             "  \"blocks\": xxxxxx,           (numeric) the current number of blocks processed in the server\n"
             "  \"timeoffset\": xxxxx,        (numeric) the time offset\n"
             "  \"connections\": xxxxx,       (numeric) the number of connections\n"
@@ -128,9 +127,6 @@ UniValue getinfo(const UniValue& params, bool fHelp)
 #ifdef ENABLE_WALLET
     if (pwalletMain) {
         obj.push_back(Pair("walletversion", pwalletMain->GetVersion()));
-        obj.push_back(Pair("balance",       ValueFromAmount(KOMODO_WALLETBALANCE))); //pwalletMain->GetBalance()
-        if ( ASSETCHAINS_SYMBOL[0] == 0 )
-            obj.push_back(Pair("interest",       ValueFromAmount(KOMODO_INTERESTSUM))); //komodo_interestsum()
     }
 #endif
     //fprintf(stderr,"after wallet %u\n",(uint32_t)time(NULL));
@@ -314,6 +310,15 @@ public:
         CScript subscript;
         obj.push_back(Pair("isscript", false));
         obj.push_back(Pair("isquantumkey", true));
+        obj.push_back(Pair("address", EncodeDestination(qID)));
+        return obj;
+    }
+
+    UniValue operator()(const CIndexID &idxID) const {
+        UniValue obj(UniValue::VOBJ);
+        obj.push_back(Pair("isscript", false));
+        obj.push_back(Pair("isindexkey", true));
+        obj.push_back(Pair("address", EncodeDestination(idxID)));
         return obj;
     }
 };
@@ -1293,7 +1298,9 @@ bool getAddressFromIndex(
         address = EncodeDestination(CScriptID(hash));
     } else if (type == CScript::P2PKH) {
         address = EncodeDestination(CKeyID(hash));
-    } else if (type == CScript::P2PKH) {
+    } else if (type == CScript::P2IDX) {
+        address = EncodeDestination(CIndexID(hash));
+    } else if (type == CScript::P2QRK) {
         address = EncodeDestination(CQuantumID(hash));
     } else {
         return false;
@@ -1724,7 +1731,7 @@ UniValue getsnapshot(const UniValue& params, bool fHelp)
     if ( fHelp || params.size() > 1)
     {
         throw runtime_error(
-                            "getsnapshot\n"
+                "getsnapshot\n"
 			    "\nReturns a snapshot of (address,amount) pairs at current height (requires addressindex to be enabled).\n"
 			    "\nArguments:\n"
 			    "  \"top\" (number, optional) Only return this many addresses, i.e. top N richlist\n"

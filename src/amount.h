@@ -29,8 +29,9 @@ extern const std::string CURRENCY_UNIT;
  * */
 //static const CAmount MAX_MONEY = 21000000 * COIN;
 extern int64_t MAX_MONEY;
+extern int64_t MAX_SUPPLY;  // largest any 64 bit supply will grow to, default 50,000,000,000
 
-inline bool MoneyRange(const CAmount& nValue) { return (nValue >= 0 && nValue <= (500000000 * COIN)); }
+inline bool MoneyRange(const CAmount& nValue) { return (nValue >= 0 && nValue <= MAX_SUPPLY); }
 
 /** Type-safe wrapper class to for fee rates
  * (how much to pay based on transaction size)

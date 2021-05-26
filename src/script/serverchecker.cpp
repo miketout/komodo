@@ -81,7 +81,7 @@ public:
 }
 
 // uses blockchain lookup
-std::map<uint160, std::pair<int, std::vector<std::vector<unsigned char>>>> ServerTransactionSignatureChecker::ExtractIDMap(const CScript &scriptPubKeyIn, uint32_t spendHeight)
+std::map<uint160, std::pair<int, std::vector<std::vector<unsigned char>>>> ServerTransactionSignatureChecker::ExtractIDMap(const CScript &scriptPubKeyIn, uint32_t spendHeight, bool isStake)
 {
     // create an ID map here, which late binds to the IDs on the blockchain as of the spend height, 
     // and substitute the correct addresses when checking signatures
@@ -93,8 +93,14 @@ std::map<uint160, std::pair<int, std::vector<std::vector<unsigned char>>>> Serve
         COptCCParams master = COptCCParams(p.vData.back());
         bool ccValid = master.IsValid();
 
-        CIdentity selfIdentity(scriptPubKeyIn);
-        uint160 selfID = selfIdentity.GetID();
+        CIdentity selfIdentity;
+        uint160 selfID;
+
+        if (p.evalCode == EVAL_IDENTITY_PRIMARY)
+        {
+            selfIdentity = CIdentity(p.vData[0]);
+            selfID = selfIdentity.GetID();
+        }
 
         // if we are sign-only, "p" will have no data object of its own, so we do not have to subtract 1
         int loopMax = p.evalCode ? p.vData.size() - 1 : p.vData.size();
@@ -114,6 +120,7 @@ std::map<uint160, std::pair<int, std::vector<std::vector<unsigned char>>>> Serve
                         // lookup identity
                         CIdentity id;
                         std::pair<CIdentityMapKey, CIdentityMapValue> idMapEntry;
+                        bool sourceIsSelf = selfIdentity.IsValid() && destId == selfID;
                         if (selfIdentity.IsValidUnrevoked() && destId == selfID)
                         {
                             id = selfIdentity;
@@ -122,7 +129,7 @@ std::map<uint160, std::pair<int, std::vector<std::vector<unsigned char>>>> Serve
                         {
                             id = CIdentity::LookupIdentity(destId, spendHeight);
                         }
-                        if (id.IsValidUnrevoked())
+                        if (id.IsValidUnrevoked() && (isStake || sourceIsSelf || !id.IsLocked(spendHeight)))
                         {
                             std::vector<std::vector<unsigned char>> idAddrBytes;
                             for (auto &oneAddr : id.primaryAddresses)

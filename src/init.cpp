@@ -1211,7 +1211,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         CVerusHash::init();
         CVerusHashV2::init();
         CBlockHeader::SetVerusV2Hash();
-        if (strcmp(ASSETCHAINS_SYMBOL,"VRSC") == 0)
+        if (IsVerusMainnetActive())
         {
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV2, 310000);
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV3, 800200);
@@ -1219,7 +1219,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV5, 1053660);
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV5_1, 1053660);
         }
-        else if (strcmp(ASSETCHAINS_SYMBOL,"VRSCTEST") == 0)
+        else if (IsVerusActive())
         {
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV2, 1);
             CConstVerusSolutionVector::activationHeight.SetActivationHeight(CActivationHeight::SOLUTION_VERUSV3, 1);
@@ -1242,8 +1242,15 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     // get default IDs and addresses
     auto defaultIDDest = DecodeDestination(GetArg("-defaultid", ""));
     VERUS_DEFAULTID = defaultIDDest.which() == COptCCParams::ADDRTYPE_ID ? CIdentityID(GetDestinationID(defaultIDDest)) : CIdentityID();
+    auto notaryIDDest = DecodeDestination(GetArg("-notaryid", ""));
+    VERUS_NOTARYID = notaryIDDest.which() == COptCCParams::ADDRTYPE_ID ? CIdentityID(GetDestinationID(notaryIDDest)) : CIdentityID();
+    auto nodeIDDest = DecodeDestination(GetArg("-nodeid", ""));
+    VERUS_NODEID = nodeIDDest.which() == COptCCParams::ADDRTYPE_ID ? GetDestinationID(nodeIDDest) : uint160();
     VERUS_DEFAULT_ZADDR = GetArg("-cheatcatcher", "");
     VERUS_DEFAULT_ZADDR = GetArg("-defaultzaddr", VERUS_DEFAULT_ZADDR);
+    MAX_OUR_UTXOS_ID_RESCAN = GetArg("-maxourutxosidrescan", MAX_OUR_UTXOS_ID_RESCAN);
+    MAX_UTXOS_ID_RESCAN = GetArg("-maxutxosidrescan", std::min(MAX_UTXOS_ID_RESCAN, MAX_OUR_UTXOS_ID_RESCAN));
+
     // if we are supposed to catch stake cheaters, there must be a valid sapling parameter, we need it at
     // initialization, and this is the first time we can get it. store the Sapling address here
     extern boost::optional<libzcash::SaplingPaymentAddress> defaultSaplingDest;
@@ -1258,7 +1265,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         {
         }
     }
-    VERUS_PRIVATECHANGE = GetBoolArg("-privatechange", defaultSaplingDest == boost::none);
+    VERUS_PRIVATECHANGE = GetBoolArg("-privatechange", !GetArg("-defaultzaddr", VERUS_DEFAULT_ZADDR).empty());
 
     // Sanity check
     if (!InitSanityCheck())
@@ -1492,8 +1499,10 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         }
     }
 
-    BOOST_FOREACH(const std::string& strDest, mapMultiArgs["-seednode"])
-        AddOneShot(strDest);
+    for (auto &oneNode : ConnectedChains.defaultPeerNodes)
+    {
+        AddOneShot(oneNode.networkAddress);
+    }
 
 #if ENABLE_ZMQ
     pzmqNotificationInterface = CZMQNotificationInterface::CreateWithArguments(mapArgs);
@@ -1586,7 +1595,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         bool checkval,fAddressIndex,fSpentIndex,fTimeStampIndex;
         pblocktree = new CBlockTreeDB(nBlockTreeDBCache, false, fReindex, dbCompression, dbMaxOpenFiles);
 
-        fAddressIndex = GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX);
+        fAddressIndex = true;
         pblocktree->ReadFlag("addressindex", checkval);
         if ( checkval != fAddressIndex  )
         {
@@ -1595,7 +1604,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
             fReindex = true;
         }
 
-        fSpentIndex = GetBoolArg("-spentindex", DEFAULT_SPENTINDEX);
+        fSpentIndex = true;
         pblocktree->ReadFlag("spentindex", checkval);
         if ( checkval != fSpentIndex )
         {
@@ -1863,11 +1872,6 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
         if (clearWitnessCaches || GetBoolArg("-rescan", false))
         {
             pwalletMain->ClearNoteWitnessCache();
-            // zap and rescan clears IDs
-            if (GetArg("-zapwallettxes", false))
-            {
-                pwalletMain->ClearIdentities();
-            }
             pindexRescan = chainActive.Genesis();
         }
         else

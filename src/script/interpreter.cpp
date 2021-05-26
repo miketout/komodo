@@ -1336,7 +1336,7 @@ TransactionSignatureChecker::TransactionSignatureChecker(const CTransaction* txT
 }
 
 // uses keystore lookup
-std::map<uint160, pair<int, std::vector<std::vector<unsigned char>>>> BaseSignatureChecker::ExtractIDMap(const CScript &scriptPubKeyIn, const CKeyStore &keystore, uint32_t spendHeight)
+std::map<uint160, pair<int, std::vector<std::vector<unsigned char>>>> BaseSignatureChecker::ExtractIDMap(const CScript &scriptPubKeyIn, const CKeyStore &keystore, uint32_t spendHeight, bool isStake)
 {
     // create an ID map here, which late binds to the IDs on the blockchain as of the spend height, 
     // and substitute the correct addresses when checking signatures
@@ -1377,7 +1377,7 @@ std::map<uint160, pair<int, std::vector<std::vector<unsigned char>>>> BaseSignat
                         {
                             id = idMapEntry.second;
                         }
-                        if (id.IsValidUnrevoked())
+                        if (id.IsValidUnrevoked() && (isStake || !id.IsLocked()))
                         {
                             std::vector<std::vector<unsigned char>> idAddrBytes;
                             for (auto &oneAddr : id.primaryAddresses)
@@ -1398,7 +1398,7 @@ TransactionSignatureChecker::TransactionSignatureChecker(const CTransaction* txT
 {
     if (pScriptPubKeyIn && pKeyStore)
     {
-        SetIDMap(ExtractIDMap(*pScriptPubKeyIn, *pKeyStore, spendHeight));
+        SetIDMap(ExtractIDMap(*pScriptPubKeyIn, *pKeyStore, spendHeight, true));
     }
 }
 
@@ -1406,7 +1406,7 @@ TransactionSignatureChecker::TransactionSignatureChecker(const CTransaction* txT
 {
     if (pScriptPubKeyIn && pKeyStore)
     {
-        SetIDMap(ExtractIDMap(*pScriptPubKeyIn, *pKeyStore, spendHeight));
+        SetIDMap(ExtractIDMap(*pScriptPubKeyIn, *pKeyStore, spendHeight, true));
     }
 }
 
@@ -1887,7 +1887,7 @@ bool VerifyScript(
 
     vector<vector<unsigned char> > stack, stackCopy;
     COptCCParams p;
-    if (IsCryptoConditionsEnabled() && scriptPubKey.IsPayToCryptoCondition(p)) {
+    if (scriptPubKey.IsPayToCryptoCondition(p)) {
 
         //UniValue r;
         //printf("eval code: %d, keys:\n", p.evalCode);

@@ -162,7 +162,8 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx, TransactionReco
         isminetype fAllToMe = ISMINE_SPENDABLE;
         for (int i = 0; i < wtx.vout.size(); i++)
         {
-            isminetype mine = wallet->IsMine(wtx, i);
+            isminetype mine;
+            wallet->IsMine(wtx, i, mine);
             if(fAllToMe > mine) fAllToMe = mine;
         }
 
@@ -178,7 +179,8 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx, TransactionReco
             {
                 const CTxOut& txout = wtx.vout[i];
                 // Ignore change
-                isminetype toSelf = wallet->IsMine(wtx, i);
+                isminetype toSelf;
+                wallet->IsMine(wtx, i, toSelf);
                 if ((toSelf == ISMINE_SPENDABLE) && (fAllFromMe == ISMINE_SPENDABLE))
                     continue;
 
@@ -312,8 +314,11 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx, TransactionReco
                         strHTML += QString::fromStdString(CBitcoinAddress(address).ToString());
                     }
                     strHTML = strHTML + " " + tr("Amount") + "=" + BitcoinUnits::formatHtmlWithUnit(unit, vout.nValue);
-                    strHTML = strHTML + " IsMine=" + (wallet->IsMine(prev, prevout.n) & ISMINE_SPENDABLE ? tr("true") : tr("false")) + "</li>";
-                    strHTML = strHTML + " IsWatchOnly=" + (wallet->IsMine(prev, prevout.n) & ISMINE_WATCH_ONLY ? tr("true") : tr("false")) + "</li>";
+
+                    isminetype mine;
+                    wallet->IsMine(prev, prevout.n, mine);
+                    strHTML = strHTML + " IsMine=" + (mine & ISMINE_SPENDABLE ? tr("true") : tr("false")) + "</li>";
+                    strHTML = strHTML + " IsWatchOnly=" + (mine & ISMINE_WATCH_ONLY ? tr("true") : tr("false")) + "</li>";
                 }
             }
         }

@@ -66,7 +66,7 @@ public:
     virtual bool RemoveIdentity(const CIdentityMapKey &mapKey, const uint256 &txid=uint256()) =0;
     virtual bool GetIdentity(const CIdentityID &idID, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity, uint32_t lteHeight=0x7fffffff) const =0;
     virtual bool GetIdentity(const CIdentityMapKey &keyStart, const CIdentityMapKey &keyEnd, std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &keysAndIdentityUpdates) const =0;
-    virtual bool GetIdentity(const CIdentityMapKey &mapKey, const uint256 &txid, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity) = 0;
+    virtual bool GetIdentity(const CIdentityMapKey &mapKey, const uint256 &txid, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity) const =0;
     virtual bool GetFirstIdentity(const CIdentityID &idID, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity, uint32_t gteHeight=0) const =0;
 
     //! Add a spending key to the store.
@@ -200,12 +200,16 @@ public:
     virtual bool RemoveIdentity(const CIdentityMapKey &mapKey, const uint256 &txid=uint256());
     virtual bool GetIdentity(const CIdentityID &idID, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity, uint32_t lteHeight=INT32_MAX) const;
     virtual bool GetIdentity(const CIdentityMapKey &keyStart, const CIdentityMapKey &keyEnd, std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &keysAndIdentityUpdates) const;
-    virtual bool GetIdentity(const CIdentityMapKey &mapKey, const uint256 &txid, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity);
+    virtual bool GetIdentity(const CIdentityMapKey &mapKey, const uint256 &txid, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity) const;
     virtual bool GetFirstIdentity(const CIdentityID &idID, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity, uint32_t gteHeight=0) const;
     virtual bool GetPriorIdentity(const CIdentityMapKey &mapKey, std::pair<CIdentityMapKey, CIdentityMapValue> &keyAndIdentity) const;
     virtual bool GetIdentities(std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &mine, 
                                std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &imsigner, 
-                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &notmine);
+                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &notmine) const;
+    virtual bool GetIdentities(const std::vector<uint160> &queryList,
+                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &mine, 
+                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &imsigner, 
+                               std::vector<std::pair<CIdentityMapKey, CIdentityMapValue>> &notmine) const;
     virtual std::set<CKeyID> GetIdentityKeyIDs();
 
     virtual bool AddWatchOnly(const CScript &dest);

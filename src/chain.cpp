@@ -229,6 +229,12 @@ bool CChain::GetMerkleProof(ChainMerkleMountainView &view, CMMRProof &retProof, 
     }
 }
 
+uint256 CChainPower::CompactChainPower() const
+{
+    arith_uint256 compactPower = (chainStake << 128) + chainWork;
+    return ArithToUint256(compactPower);
+}
+
 CChainPower::CChainPower(CBlockIndex *pblockIndex)
 {
      nHeight = pblockIndex->GetHeight();
@@ -276,7 +282,7 @@ bool operator<=(const CChainPower &p1, const CChainPower &p2)
             ((p2.chainWork << 16) / workDivisor + (p2.chainStake << 16) / stakeDivisor);
 }
 
-CChainPower ExpandCompactPower(uint256 compactPower, uint32_t height)
+CChainPower CChainPower::ExpandCompactPower(uint256 compactPower, uint32_t height)
 {
     return CChainPower(height, UintToArith256(compactPower) >> 128, (UintToArith256(compactPower) << 128) >> 128);
 }

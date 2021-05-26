@@ -20,11 +20,9 @@
 #define MMR_H
 
 #include <vector>
+#include <univalue.h>
 
-//#include "CCinclude.h"
 #include "streams.h"
-#include "script/script.h"
-#include "sync.h"
 #include "hash.h"
 #include "arith_uint256.h"
 

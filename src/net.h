@@ -34,6 +34,7 @@ class CAddrMan;
 class CBlockIndex;
 class CScheduler;
 class CNode;
+extern uint160 VERUS_NODEID;
 
 namespace boost {
     class thread_group;

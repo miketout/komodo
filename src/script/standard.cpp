@@ -163,6 +163,18 @@ COptCCParams::COptCCParams(const std::vector<unsigned char> &vch)
                                     }
                                     break;
                                 }
+                                case ADDRTYPE_INDEX:
+                                {
+                                    if (keyVec.size() == 21)
+                                    {
+                                        vKeys.push_back(CIndexID(uint160(std::vector<unsigned char>(keyVec.begin() + 1, keyVec.end()))));
+                                    }
+                                    else
+                                    {
+                                        version = 0;
+                                    }
+                                    break;
+                                }
                                 default:
                                     version = 0;
                             }
@@ -195,7 +207,7 @@ std::vector<unsigned char> COptCCParams::AsVector() const
     for (auto k : vKeys)
     {
         std::vector<unsigned char> keyBytes = GetDestinationBytes(k);
-        if (version > VERSION_V2 && (k.which() == ADDRTYPE_SH || k.which() == ADDRTYPE_ID))
+        if (version > VERSION_V2 && k.which() != ADDRTYPE_PK && k.which() != ADDRTYPE_PKH)
         {
             keyBytes.insert(keyBytes.begin(), (uint8_t)k.which());
         }
@@ -250,7 +262,7 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
                     EVAL_NONE,
                     EVAL_STAKEGUARD,
                     EVAL_CURRENCY_DEFINITION,
-                    EVAL_SERVICEREWARD,
+                    EVAL_NOTARY_EVIDENCE,
                     EVAL_EARNEDNOTARIZATION,
                     EVAL_ACCEPTEDNOTARIZATION,
                     EVAL_FINALIZE_NOTARIZATION,
@@ -266,7 +278,8 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
                     EVAL_IDENTITY_RECOVER,
                     EVAL_IDENTITY_COMMITMENT,
                     EVAL_IDENTITY_RESERVATION,
-                    EVAL_FINALIZE_EXPORT
+                    EVAL_FINALIZE_EXPORT,
+                    EVAL_FEE_POOL
                 });
                 if (VALID_EVAL_CODES.count(cp.evalCode))
                 {
@@ -549,7 +562,7 @@ bool ExtractDestinations(const CScript& scriptPubKey,
                          const CKeyStore *pKeyStore, 
                          bool *pCanSign, 
                          bool *pCanSpend,
-                         uint32_t lastIdHeight,
+                         uint32_t nHeight,
                          std::map<uint160, CKey> *pPrivKeys)
 {
     addressRet.clear();
@@ -566,11 +579,20 @@ bool ExtractDestinations(const CScript& scriptPubKey,
         CScript postfix = CScript(scriptPubKey.size() > scriptStart ? scriptPubKey.begin() + scriptStart : scriptPubKey.end(), scriptPubKey.end());
 
         // check again with only postfix subscript
-        return(ExtractDestinations(postfix, typeRet, addressRet, nRequiredRet, pKeyStore, pCanSign, pCanSpend, lastIdHeight, pPrivKeys));
+        return(ExtractDestinations(postfix, typeRet, addressRet, nRequiredRet, pKeyStore, pCanSign, pCanSpend, nHeight, pPrivKeys));
     }
 
     int canSpendCount = 0;
     bool canSign = false;
+
+    if (pCanSign)
+    {
+        *pCanSign = false;
+    }
+    if (pCanSpend)
+    {
+        *pCanSpend = false;
+    }
 
     COptCCParams master, p;
     bool ccValid;
@@ -596,7 +618,7 @@ bool ExtractDestinations(const CScript& scriptPubKey,
                         std::pair<CIdentityMapKey, CIdentityMapValue> identity;
                         idSet.insert(destId);
 
-                        if (pKeyStore && pKeyStore->GetIdentity(destId, identity, lastIdHeight) && identity.second.IsValidUnrevoked())
+                        if (pKeyStore && pKeyStore->GetIdentity(destId, identity, std::max((uint32_t)1, nHeight - 1)) && identity.second.IsValidUnrevoked())
                         {
                             int canSignCount = 0;
                             for (auto oneKey : identity.second.primaryAddresses)
@@ -664,11 +686,13 @@ bool ExtractDestinations(const CScript& scriptPubKey,
                     }
                 }
 
-                for (int i = -1; ccValid && i < (int)(p.vData.size() - 1); i++)
+                // handle the case where we have no object in the params, but a valid transaction
+                int loopEnd = p.vData.size() == 1 ? 1 : p.vData.size() - 1;
+                for (int i = 0; ccValid && i < loopEnd; i++)
                 {
                     // first, process P, then any sub-conditions
                     COptCCParams _oneP;
-                    COptCCParams &oneP = (i == -1) ? p : (_oneP = COptCCParams(p.vData[i]));
+                    COptCCParams &oneP = (i == 0) ? p : (_oneP = COptCCParams(p.vData[i]));
 
                     if (ccValid = oneP.IsValid())
                     {
@@ -690,7 +714,7 @@ bool ExtractDestinations(const CScript& scriptPubKey,
 
                                 //printf("checking: %s\n", EncodeDestination(dest).c_str());
 
-                                if (pKeyStore && pKeyStore->GetIdentity(destId, identity, lastIdHeight) && identity.second.IsValidUnrevoked())
+                                if (pKeyStore && pKeyStore->GetIdentity(destId, identity, std::max((uint32_t)1, nHeight - 1)) && identity.second.IsValidUnrevoked())
                                 {
                                     int canSignCount = 0;
                                     for (auto oneKey : identity.second.primaryAddresses)
@@ -738,6 +762,12 @@ bool ExtractDestinations(const CScript& scriptPubKey,
                     }
                 }
 
+                if (!ccValid)
+                {
+                    LogPrintf("Invalid smart transaction %d\n", p.evalCode);
+                    //return false;
+                }
+
                 // if this is a compound cc, the master m of n is the top level as an m of n of the sub-conditions
                 nRequiredRet = p.vData.size() > 2 ? master.m : p.m;
                 if (canSpendCount >= nRequiredRet && pCanSpend)
@@ -757,6 +787,14 @@ bool ExtractDestinations(const CScript& scriptPubKey,
                     // this kind of ID is defined as a CKeyID, since use of script hash type in CCs are reserved for IDs
                     addressRet.push_back(CKeyID(Hash160(subScr)));
                     nRequiredRet = 1;
+                    if (pCanSign)
+                    {
+                        *pCanSign = true;
+                    }
+                    if (pCanSpend)
+                    {
+                        *pCanSpend = true;
+                    }
                 }
                 else
                 {
@@ -782,6 +820,7 @@ bool ExtractDestinations(const CScript& scriptPubKey,
         if (typeRet == TX_MULTISIG)
         {
             nRequiredRet = vSolutions.front()[0];
+            int nHaveKeys = 0;
             for (unsigned int i = 1; i < vSolutions.size()-1; i++)
             {
                 CPubKey pubKey(vSolutions[i]);
@@ -790,10 +829,28 @@ bool ExtractDestinations(const CScript& scriptPubKey,
 
                 CTxDestination address = pubKey.GetID();
                 addressRet.push_back(address);
+
+                // if we were asked to see whether we can sign or spend, determine
+                if ((pCanSign || pCanSpend) && pKeyStore)
+                {
+                    if (pKeyStore->HaveKey(GetDestinationID(address)))
+                    {
+                        nHaveKeys++;
+                    }
+                }
             }
 
             if (addressRet.empty())
                 return false;
+
+            if (pCanSign && nHaveKeys)
+            {
+                *pCanSign = true;
+            }
+            if (pCanSpend && nHaveKeys >= nRequiredRet)
+            {
+                *pCanSpend = true;
+            }
         }
         else
         {
@@ -801,9 +858,23 @@ bool ExtractDestinations(const CScript& scriptPubKey,
             CTxDestination address;
             if (!ExtractDestination(scriptPubKey, address))
             {
-            return false;
+                return false;
             }
             addressRet.push_back(address);
+            if ((pCanSign || pCanSpend) && pKeyStore)
+            {
+                if (pKeyStore->HaveKey(GetDestinationID(address)))
+                {
+                    if (pCanSign)
+                    {
+                        *pCanSign = true;
+                    }
+                    if (pCanSpend)
+                    {
+                        *pCanSpend = true;
+                    }
+                }
+            }
         }
     }
     
@@ -820,6 +891,11 @@ public:
     CScriptVisitor(CScript *scriptin) { script = scriptin; }
 
     bool operator()(const CNoDestination &dest) const {
+        script->clear();
+        return false;
+    }
+
+    bool operator()(const CIndexID &dest) const {
         script->clear();
         return false;
     }
@@ -890,6 +966,10 @@ CTxDestination DestFromAddressHash(int scriptType, uint160& addressHash)
         return CTxDestination(CIdentityID(addressHash));
     case CScript::P2SH:
         return CTxDestination(CScriptID(addressHash));
+    case CScript::P2IDX:
+        return CTxDestination(CIndexID(addressHash));
+    case CScript::P2QRK:
+        return CTxDestination(CQuantumID(addressHash));
     default:
         // This probably won't ever happen, because it would mean that
         // the addressindex contains a type (say, 3) that we (currently)
@@ -909,6 +989,8 @@ CScript::ScriptType AddressTypeFromDest(const CTxDestination &dest)
         return CScript::P2SH;
     case COptCCParams::ADDRTYPE_ID:
         return CScript::P2ID;
+    case COptCCParams::ADDRTYPE_INDEX:
+        return CScript::P2IDX;
     case COptCCParams::ADDRTYPE_QUANTUM:
         return CScript::P2QRK;
     default:

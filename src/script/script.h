@@ -409,6 +409,17 @@ public:
     CQuantumID(const uint160& in) : uint160(in) {}
 };
 
+/** A reference to an index only address type, not used in the API or externally, but
+ * reserved as an index for specific types of transaction outputs that can then be queried
+ * and assumed to be valid and checked if found.
+ * CQuantum public keys are indexed by a CIndexID that represents a hash of the quantum public key. */
+class CIndexID : public uint160
+{
+public:
+    CIndexID() : uint160() {}
+    CIndexID(const uint160& in) : uint160(in) {}
+};
+
 /** 
  * A txout script template with a specific destination. It is either:
  *  * CNoDestination: no destination set
@@ -416,9 +427,9 @@ public:
  *  * CScriptID: TX_SCRIPTHASH destination
  *  A CTxDestination is the internal data type encoded in a bitcoin address
  */
-typedef boost::variant<CNoDestination, CPubKey, CKeyID, CScriptID, CIdentityID, CQuantumID> CTxDestination;
+typedef boost::variant<CNoDestination, CPubKey, CKeyID, CScriptID, CIdentityID, CIndexID, CQuantumID> CTxDestination;
 
-CTxDestination TransferDestinationToDestination(const CTransferDestination &trasnferDest);
+CTxDestination TransferDestinationToDestination(const CTransferDestination &transferDest);
 CTransferDestination DestinationToTransferDestination(const CTxDestination &dest);
 CTransferDestination IdentityToTransferDestination(const CIdentity &identity);
 CIdentity TransferDestinationToIdentity(const CTransferDestination &dest);
@@ -437,8 +448,9 @@ public:
     static const uint8_t ADDRTYPE_PKH = 2;
     static const uint8_t ADDRTYPE_SH = 3;
     static const uint8_t ADDRTYPE_ID = 4;
-    static const uint8_t ADDRTYPE_QUANTUM = 5;
-    static const uint8_t ADDRTYPE_LAST = 5;
+    static const uint8_t ADDRTYPE_INDEX = 5;
+    static const uint8_t ADDRTYPE_QUANTUM = 6;
+    static const uint8_t ADDRTYPE_LAST = 6;
 
     uint8_t version;
     uint8_t evalCode;
@@ -457,52 +469,9 @@ public:
 
     std::vector<unsigned char> AsVector() const;
 
-    std::vector<CTxDestination> GetDestinations() const
-    {
-        std::vector<CTxDestination> destinations;
-        if (IsValid() && (vKeys.size()))
-        {
-            COptCCParams master;
-            if (version >= VERSION_V3 && vData.size() > 1 && (master = COptCCParams(vData.back())).IsValid())
-            {
-                std::set<CTxDestination> dests;
-                for (auto dest : master.vKeys)
-                {
-                    dests.insert(dest);
-                }
-                for (auto dest : vKeys)
-                {
-                    if (dest.which() == COptCCParams::ADDRTYPE_ID)
-                    {
-                        dests.insert(dest);
-                    }
-                }
-                for (int i = 1; i < (int)(vData.size() - 1); i++)
-                {
-                    COptCCParams oneP(vData[i]);
-                    if (oneP.IsValid())
-                    {
-                        for (auto dest : oneP.vKeys)
-                        {
-                            if (dest.which() == COptCCParams::ADDRTYPE_ID)
-                            {
-                                dests.insert(dest);
-                            }
-                        }
-                    }
-                }
-                for (auto dest : dests)
-                {
-                    destinations.push_back(dest);
-                }
-            }
-            else
-            {
-                destinations.push_back(vKeys[0]);
-            }
-        }
-        return destinations;
-    }
+    std::set<CIndexID> GetIndexKeys() const;
+    std::map<uint160, uint32_t> GetIndexHeightOffsets(uint32_t height) const;
+    std::vector<CTxDestination> GetDestinations() const;
 };
 
 // This is for STAKEGUARD2, which is versioned and enables staking the reserve of a reserve currency
@@ -825,7 +794,8 @@ public:
         P2CC = 1,   // CCs are actually not an address type, but as a type of transaction, they are identified historicall as P2PKH. they now can also pay to IDs.
         P2SH = 2,
         P2ID = 3,
-        P2QRK = 4,
+        P2IDX = 4,
+        P2QRK = 5,
     };
 
     ScriptType GetType() const;

@@ -190,7 +190,7 @@ bool ValidateStakeTransaction(const CTransaction &stakeTx, CStakeParams &stakePa
                         std::map<uint160, pair<int, std::vector<std::vector<unsigned char>>>> idAddressMap;
                         if (validateSig)
                         {
-                            idAddressMap = ServerTransactionSignatureChecker::ExtractIDMap(srcTx.vout[stakeTx.vin[0].prevout.n].scriptPubKey, stakeParams.blkHeight);
+                            idAddressMap = ServerTransactionSignatureChecker::ExtractIDMap(srcTx.vout[stakeTx.vin[0].prevout.n].scriptPubKey, stakeParams.blkHeight, true);
                         }
 
                         if (!validateSig || VerifyScript(stakeTx.vin[0].scriptSig, 
@@ -232,9 +232,6 @@ bool MakeGuardedOutput(CAmount value, CTxDestination &dest, CTransaction &stakeT
             CConditionObj<CStakeInfo> primary(EVAL_STAKEGUARD, dests1, 1, &stakeInfo);
             std::vector<CTxDestination> dests2({CTxDestination(CPubKey(ParseHex(cp->CChexstr)))});
             CConditionObj<CStakeInfo> cheatCatcher(EVAL_STAKEGUARD, dests2, 1);
-
-            std::vector<CTxDestination> indexDests;
-
             vout = CTxOut(value, MakeMofNCCScript(1, primary, cheatCatcher));
         }
         else if (dest.which() == COptCCParams::ADDRTYPE_PK)

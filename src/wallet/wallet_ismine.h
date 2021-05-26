@@ -23,9 +23,9 @@ enum isminetype
     ISMINE_ALLANDCHANGE = ISMINE_ALL | ISMINE_CHANGE
 };
 /** used for bitflags of isminetype */
-typedef uint8_t isminefilter;
+typedef isminetype isminefilter;
 
-isminetype IsMine(const CKeyStore& keystore, const CScript& scriptPubKey);
+isminetype IsMine(const CKeyStore& keystore, const CScript& scriptPubKey, uint32_t height=INT_MAX);
 isminetype IsMine(const CKeyStore& keystore, const CTxDestination& dest);
 
 #endif // BITCOIN_WALLET_WALLET_ISMINE_H

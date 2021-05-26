@@ -205,7 +205,7 @@ class CPBaaSSolutionDescriptor
         // this is additional data for the block specific header. this is also cleared out
         // when making a canonical header, and the values here are hashed into the pre-header hash
         uint256 hashPrevMMRRoot;                                       // prior block's Merkle Mountain Range
-        uint256 hashBlockMMRRoot;                                // this is the root MMR for transactions in this block
+        uint256 hashBlockMMRRoot;                                      // this is the root MMR for transactions in this block
         // end block specific data
 
         CPBaaSSolutionDescriptor() : version(0), descrBits(0), numPBaaSHeaders(0), extraDataSize(0) {}
@@ -368,11 +368,11 @@ class CConstVerusSolutionVector
             return GetDescriptor(vch).numPBaaSHeaders * sizeof(CPBaaSBlockHeader) + OVERHEAD_SIZE;
         }
 
-        static uint32_t ExtraDataLen(const std::vector<unsigned char> &vch)
+        static uint32_t ExtraDataLen(const std::vector<unsigned char> &vch, bool allowPBaaSHeader=false)
         {
             int len;
 
-            if (Version(vch) < CActivationHeight::ACTIVATE_PBAAS)
+            if (!(Version(vch) >= CActivationHeight::ACTIVATE_PBAAS || (allowPBaaSHeader && Version(vch) >= CActivationHeight::ACTIVATE_PBAAS_HEADER)))
             {
                 len = 0;
             }

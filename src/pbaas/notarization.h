@@ -63,174 +63,128 @@
 #include "key_io.h"
 #include "pbaas/pbaas.h"
 
-// This is the data for a PBaaS notarization transaction, either of a PBaaS chain into the Verus chain, or the Verus
-// chain into a PBaaS chain.
-
-// Part of a transaction with an opret that contains only the hashes and proofs, without the source
-// headers, transactions, and objects. This type of notarizatoin is mined into a block by the miner, and is created on the PBaaS
-// chain.
-//
-// Notarizations include the following elements in order:
-//  Latest block header being notarized, or a header ref for a merge-mined header
-//  Proof of the header using the latest MMR root
-//  Cross notarization transaction less its op_ret
-//  Proof of the cross notarization using the latest MMR root
-class CPBaaSNotarization
+class CObjectFinalization
 {
 public:
-    //static const int FINAL_CONFIRMATIONS = 10;
-    //static const int MIN_BLOCKS_BETWEEN_ACCEPTED = 8;
-    static const int FINAL_CONFIRMATIONS = 9;
-    static const int MIN_BLOCKS_BETWEEN_ACCEPTED = 5;
-    static const int CURRENT_VERSION = PBAAS_VERSION;
-    static const int MAX_NODES = 2;
+    static const int32_t UNCONFIRMED_INPUT = -1;
+    enum {
+        VERSION_INVALID = 0,
+        VERSION_FIRST = 1,
+        VERSION_LAST = 1,
+        VERSION_CURRENT = 1
+    };
 
-    uint32_t nVersion;                      // PBAAS version
-    int32_t protocol;                       // notarization protocol
-    uint160 currencyID;                       // currency being notarized
-    CTxDestination notaryDest;              // confirmed notary rewards are spent to this address when this notarization is confirmed
+    enum EFinalizationType {
+        FINALIZE_INVALID = 0,
+        FINALIZE_NOTARIZATION = 1,      // confirmed when notarization is deemed correct / final
+        FINALIZE_EXPORT = 2,            // confirmed when export has no more work to do
+        FINALIZE_CURRENCY_LAUNCH = 4,   // confirmed on successful currency launch, rejected on refund
+        FINALIZE_REJECTED = 0x40,       // flag set when confirmation is rejected and/or proven false
+        FINALIZE_CONFIRMED = 0x80,      // flag set when object finalization is confirmed
+        FINALIZE_TYPE_MASK = ~(FINALIZE_REJECTED | FINALIZE_CONFIRMED)
+    };
 
-    uint32_t notarizationHeight;            // height (or sequence) of the notarization we certify
-    uint256 mmrRoot;                        // latest MMR root of the notarization height
-    uint256 notarizationPreHash;            // combination of block hash, block MMR root, and compact power (or external proxy) for the notarization height
-    uint256 compactPower;                   // compact power (or external proxy) of the block height notarization to compare
+    uint8_t version;
+    uint8_t finalizationType;
+    uint32_t minFinalizationHeight;     // to enable indexing/querying potential finalizations by height
+    uint160 currencyID;                 // here when needed for indexing purposes
+    CUTXORef output;                    // output/object to finalize
+    std::vector<int32_t> evidenceInputs; // indexes into vin that are evidence to support the current state
+    std::vector<int32_t> evidenceOutputs; // tx output indexes that are evidence to support the current state    
 
-    CCoinbaseCurrencyState currencyState;   // currency state of this currency as of this notarization
-
-    uint256 prevNotarization;               // txid of the prior notarization on this chain that we agree with, even those not accepted yet
-    int32_t prevHeight;
-    uint256 crossNotarization;              // hash of previous notarization transaction on the other chain, which is the first tx object in the opret input
-    int32_t crossHeight;
-
-    COpRetProof opRetProof;                 // hashes and types of all objects in our opret, enabling reconstruction without the opret on notarized chain
-
-    std::vector<CNodeData> nodes;           // network nodes
-
-    CPBaaSNotarization() : nVersion(PBAAS_VERSION_INVALID) { }
-
-    CPBaaSNotarization(int32_t Protocol,
-                       const uint160 &currencyid,
-                       const CTxDestination &notaryDestination,
-                       int32_t notarizationheight, 
-                       const uint256 &MMRRoot,
-                       const uint256 &preHash,
-                       const uint256 &compactpower,
-                       const CCoinbaseCurrencyState &currencystate,
-                       const uint256 &prevnotarization,
-                       int32_t prevheight,
-                       const uint256 &crossnotarization,
-                       int32_t crossheight,
-                       const COpRetProof &orp,
-                       const std::vector<CNodeData> &Nodes=std::vector<CNodeData>(),
-                       uint32_t version = CURRENT_VERSION) : 
-                       nVersion(version),
-                       currencyID(currencyid),
-                       protocol(Protocol),
-                       notaryDest(notaryDestination),
-
-                       notarizationHeight(notarizationheight),
-                       mmrRoot(MMRRoot),
-                       notarizationPreHash(preHash),
-                       compactPower(compactpower),
-                       currencyState(currencystate),
-
-                       prevNotarization(prevnotarization),
-                       prevHeight(prevheight),
-                       crossNotarization(crossnotarization),
-                       crossHeight(crossheight),
-
-                       opRetProof(orp),
-
-                       nodes(Nodes)
-    { }
-
-    CPBaaSNotarization(const std::vector<unsigned char> &asVector)
-    {
-        ::FromVector(asVector, *this);
-    }
-
-    CPBaaSNotarization(const CTransaction &tx, int32_t *pOutIdx=nullptr);
-
-    CPBaaSNotarization(const CScript &scriptPubKey);
-
-    CPBaaSNotarization(const UniValue &obj);
-
-    ADD_SERIALIZE_METHODS;
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(VARINT(nVersion));
-        READWRITE(currencyID);
-        READWRITE(protocol);
-        if (ser_action.ForRead())
-        {
-            CTransferDestination tDest;
-            READWRITE(tDest);
-            notaryDest = TransferDestinationToDestination(tDest);
-        }
-        else
-        {
-            CTransferDestination tDest(DestinationToTransferDestination(notaryDest));
-            READWRITE(tDest);
-        }
-        READWRITE(notarizationHeight);
-        READWRITE(mmrRoot);
-        READWRITE(notarizationPreHash);
-        READWRITE(compactPower);
-        READWRITE(currencyState);
-        READWRITE(prevNotarization);
-        READWRITE(prevHeight);
-        READWRITE(crossNotarization);
-        READWRITE(crossHeight);
-        READWRITE(opRetProof);
-        READWRITE(nodes);
-    }
-
-    std::vector<unsigned char> AsVector()
-    {
-        return ::AsVector(*this);
-    }
-
-    bool IsValid() const
-    {
-        return !mmrRoot.IsNull();
-    }
-
-    // if false, *this is unmodifed, otherwise, it is set to the last valid notarization in the requested range
-    bool GetLastNotarization(const uint160 &currencyID, 
-                             uint32_t eCode, 
-                             int32_t startHeight=0, 
-                             int32_t endHeight=0, 
-                             uint256 *txIDOut=nullptr,
-                             CTransaction *txOut=nullptr);
-
-    UniValue ToUniValue() const;
-};
-
-class CTransactionFinalization
-{
-public:
-    static const int64_t DEFAULT_OUTPUT_VALUE = 100000;
-    int32_t confirmedInput;
-
-    CTransactionFinalization() : confirmedInput(-1) {}
-    CTransactionFinalization(int32_t nIn) : confirmedInput(nIn) {}
-    CTransactionFinalization(std::vector<unsigned char> vch)
+    CObjectFinalization() : version(VERSION_INVALID), finalizationType(FINALIZE_INVALID) {}
+    CObjectFinalization(uint8_t fType, const uint160 &curID, const uint256 &TxId, uint32_t outNum, uint32_t minFinalHeight=0) : 
+        version(VERSION_CURRENT), finalizationType(fType), minFinalizationHeight(minFinalHeight), currencyID(curID), output(TxId, outNum) {}
+    CObjectFinalization(const std::vector<unsigned char> &vch)
     {
         ::FromVector(vch, *this);
     }
-    CTransactionFinalization(const CTransaction &tx, uint32_t *pEcode=nullptr, int32_t *pFinalizationOutNum=nullptr);
+    CObjectFinalization(const CTransaction &tx, uint32_t *pEcode=nullptr, int32_t *pFinalizationOutNum=nullptr);
+    CObjectFinalization(const CScript &script);
 
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(confirmedInput);
+        READWRITE(version);
+        READWRITE(finalizationType);
+        READWRITE(currencyID);
+        READWRITE(output);
+        if (IsConfirmed() || IsRejected())
+        {
+            READWRITE(evidenceInputs);
+            READWRITE(evidenceOutputs);
+        }
     }
 
     bool IsValid() const
     {
-        return confirmedInput != -1;
+        return version >= VERSION_FIRST && 
+                version <= VERSION_LAST &&
+                finalizationType != FINALIZE_INVALID && 
+                !currencyID.IsNull() &&
+                output.IsValid();
+    }
+
+    EFinalizationType FinalizationType() const
+    {
+        return (EFinalizationType)(finalizationType & FINALIZE_TYPE_MASK);
+    }
+
+    bool IsPending() const
+    {
+        return !(finalizationType & FINALIZE_REJECTED || finalizationType & FINALIZE_CONFIRMED);
+    }
+
+    bool IsConfirmed() const
+    {
+        return finalizationType & FINALIZE_CONFIRMED;
+    }
+
+    void SetConfirmed(bool setTrue=true)
+    {
+        if (setTrue)
+        {
+            SetRejected(false);
+            finalizationType |= FINALIZE_CONFIRMED;
+        }
+        else
+        {
+            finalizationType &= ~FINALIZE_CONFIRMED;
+        }
+    }
+
+    bool IsRejected() const
+    {
+        return finalizationType & FINALIZE_REJECTED;
+    }
+
+    void SetRejected(bool setTrue=true)
+    {
+        if (setTrue)
+        {
+            SetConfirmed(false);
+            finalizationType |= FINALIZE_REJECTED;
+        }
+        else
+        {
+            finalizationType &= ~FINALIZE_REJECTED;
+        }
+    }
+
+    bool IsLaunchFinalization() const
+    {
+        return (finalizationType & FINALIZE_TYPE_MASK) == FINALIZE_CURRENCY_LAUNCH;
+    }
+
+    bool IsExportFinalization() const
+    {
+        return (finalizationType & FINALIZE_TYPE_MASK) == FINALIZE_EXPORT;
+    }
+
+    bool IsNotarizationFinalization() const
+    {
+        return (finalizationType & FINALIZE_TYPE_MASK) == FINALIZE_NOTARIZATION;
     }
 
     std::vector<unsigned char> AsVector()
@@ -238,12 +192,105 @@ public:
         return ::AsVector(*this);
     }
 
-    UniValue ToUniValue() const
+    bool GetOutputTransaction(const CTransaction &initialTx, CTransaction &tx, uint256 &blockHash) const;
+
+    // Sign the output object with an ID or signing authority of the ID from the wallet.
+    CNotaryEvidence SignConfirmed(const CWallet *pWallet, const CTransaction &initialTx, const CIdentityID &signatureID) const;
+    CNotaryEvidence SignRejected(const CWallet *pWallet, const CTransaction &initialTx, const CIdentityID &signatureID) const;
+
+    // Verify that the output object is signed with an ID or signing authority of the ID from the wallet.
+    CIdentitySignature::ESignatureVerification VerifyOutputSignature(const CTransaction &initialTx, const CNotaryEvidence &signature, const COptCCParams &p, uint32_t height) const;
+    CIdentitySignature::ESignatureVerification VerifyOutputSignature(const CTransaction &initialTx, const CNotaryEvidence &signature, uint32_t height) const;
+
+    static std::vector<std::pair<uint32_t, CInputDescriptor>> GetUnspentConfirmedFinalizations(const uint160 &currencyID);
+    static std::vector<std::pair<uint32_t, CInputDescriptor>> GetUnspentPendingFinalizations(const uint160 &currencyID);
+    static std::vector<std::pair<uint32_t, CInputDescriptor>> GetUnspentEvidence(const uint160 &currencyID,
+                                                                                 const uint256 &notarizationTxId,
+                                                                                 int32_t notarizationOutNum);
+
+    // enables easily finding all pending finalizations for a
+    // currency, either notarizations or exports
+    static std::string ObjectFinalizationPendingKeyName()
     {
-        UniValue ret(UniValue::VOBJ);
-        ret.push_back(Pair("confirmedinput", confirmedInput));
-        return ret;
+        return "vrsc::system.finalization.pending";
     }
+
+    // enables easily finding all pending finalizations for a
+    // currency, either notarizations or exports
+    static std::string ObjectFinalizationPrelaunchKeyName()
+    {
+        return "vrsc::system.finalization.prelaunch";
+    }
+
+    // enables easily finding all pending finalizations for a
+    // currency, either notarizations or exports
+    static std::string ObjectFinalizationNotarizationKeyName()
+    {
+        return "vrsc::system.finalization.notarization";
+    }
+
+    // enables easily finding all pending finalizations for a
+    // currency, either notarizations or exports
+    static std::string ObjectFinalizationExportKeyName()
+    {
+        return "vrsc::system.finalization.export";
+    }
+
+    // enables easily finding all confirmed finalizations
+    static std::string ObjectFinalizationConfirmedKeyName()
+    {
+        return "vrsc::system.finalization.confirmed";
+    }
+
+    // enables location of rejected finalizations
+    static std::string ObjectFinalizationRejectedKeyName()
+    {
+        return "vrsc::system.finalization.rejected";
+    }
+
+    static uint160 ObjectFinalizationPendingKey()
+    {
+        static uint160 nameSpace;
+        static uint160 key = CVDXF::GetDataKey(ObjectFinalizationPendingKeyName(), nameSpace);
+        return key;
+    }
+
+    static uint160 ObjectFinalizationPrelaunchKey()
+    {
+        static uint160 nameSpace;
+        static uint160 key = CVDXF::GetDataKey(ObjectFinalizationPrelaunchKeyName(), nameSpace);
+        return key;
+    }
+
+    static uint160 ObjectFinalizationNotarizationKey()
+    {
+        static uint160 nameSpace;
+        static uint160 key = CVDXF::GetDataKey(ObjectFinalizationNotarizationKeyName(), nameSpace);
+        return key;
+    }
+
+    static uint160 ObjectFinalizationExportKey()
+    {
+        static uint160 nameSpace;
+        static uint160 key = CVDXF::GetDataKey(ObjectFinalizationExportKeyName(), nameSpace);
+        return key;
+    }
+
+    static uint160 ObjectFinalizationConfirmedKey()
+    {
+        static uint160 nameSpace;
+        static uint160 key = CVDXF::GetDataKey(ObjectFinalizationConfirmedKeyName(), nameSpace);
+        return key;
+    }
+
+    static uint160 ObjectFinalizationRejectedKey()
+    {
+        static uint160 nameSpace;
+        static uint160 key = CVDXF::GetDataKey(ObjectFinalizationRejectedKeyName(), nameSpace);
+        return key;
+    }
+
+    UniValue ToUniValue() const;
 };
 
 class CChainNotarizationData
@@ -252,20 +299,23 @@ public:
     static const int CURRENT_VERSION = PBAAS_VERSION;
     uint32_t version;
 
-    std::vector<std::pair<uint256, CPBaaSNotarization>> vtx;
+    std::vector<std::pair<CUTXORef, CPBaaSNotarization>> vtx;
     int32_t lastConfirmed;                          // last confirmed notarization
     std::vector<std::vector<int32_t>> forks;        // chains that represent alternate branches from the last confirmed notarization
     int32_t bestChain;                              // index in forks of the chain, beginning with the last confirmed notarization, that has the most power
 
     CChainNotarizationData() : version(0), lastConfirmed(-1) {}
 
-    CChainNotarizationData(uint32_t ver, int32_t start, int32_t end, 
-                           std::vector<std::pair<uint256, CPBaaSNotarization>> txes,
-                           int32_t lastConf,
-                           std::vector<std::vector<int32_t>> &Forks,
-                           int32_t Best) : 
-                        version(ver),
-                        vtx(txes), lastConfirmed(lastConf), bestChain(Best), forks(Forks) {}
+    CChainNotarizationData(const std::vector<std::pair<CUTXORef, CPBaaSNotarization>> &txes,
+                           int32_t lastConf=-1,
+                           const std::vector<std::vector<int32_t>> &Forks=std::vector<std::vector<int32_t>>(),
+                           int32_t Best=-1, 
+                           uint32_t ver=CURRENT_VERSION) : 
+                           version(ver),
+                           vtx(txes), 
+                           lastConfirmed(lastConf), 
+                           bestChain(Best), 
+                           forks(Forks) {}
 
     CChainNotarizationData(std::vector<unsigned char> vch)
     {
@@ -281,6 +331,7 @@ public:
         READWRITE(version);
         READWRITE(vtx);
         READWRITE(bestChain);
+        READWRITE(lastConfirmed);
         READWRITE(forks);
     }
 
@@ -303,22 +354,15 @@ public:
     UniValue ToUniValue() const;
 };
 
-bool CreateEarnedNotarization(CMutableTransaction &mnewTx, std::vector<CInputDescriptor> &inputs, CTransaction &lastTx, CTransaction &crossTx, CTransaction &lastConfirmed, int32_t height, int32_t *confirmedInput, CTxDestination *confirmedDest);
-uint256 CreateAcceptedNotarization(const CBlock &blk, int32_t txIndex, int32_t height);
-std::vector<CInputDescriptor> AddSpendsAndFinalizations(CChainNotarizationData &cnd, 
-                                                        const uint256 &lastNotarizationID, 
-                                                        CMutableTransaction &mnewTx, 
-                                                        int32_t *pConfirmedInput, 
-                                                        int32_t *pConfirmedIdx, 
-                                                        CTxDestination *pConfirmedDest);
-bool GetNotarizationAndFinalization(int32_t ecode, CMutableTransaction mtx, CPBaaSNotarization &pbn, uint32_t *pNotarizeOutIndex, uint32_t *pFinalizeOutIndex);
-bool ValidateEarnedNotarization(CTransaction &ntx, CPBaaSNotarization *notarization = NULL);
+std::vector<CNodeData> GetGoodNodes(int maxNum=CCurrencyDefinition::MAX_STARTUP_NODES);
 bool ValidateEarnedNotarization(struct CCcontract_info *cp, Eval* eval, const CTransaction &tx, uint32_t nIn, bool fulfilled);
 bool IsEarnedNotarizationInput(const CScript &scriptSig);
 bool ValidateAcceptedNotarization(struct CCcontract_info *cp, Eval* eval, const CTransaction &tx, uint32_t nIn, bool fulfilled);
 bool IsAcceptedNotarizationInput(const CScript &scriptSig);
 bool ValidateFinalizeNotarization(struct CCcontract_info *cp, Eval* eval, const CTransaction &tx, uint32_t nIn, bool fulfilled);
 bool IsFinalizeNotarizationInput(const CScript &scriptSig);
-bool IsServiceRewardInput(const CScript &scriptSig);
+bool IsNotaryEvidenceInput(const CScript &scriptSig);
+extern string PBAAS_HOST, PBAAS_USERPASS, ASSETCHAINS_RPCHOST, ASSETCHAINS_RPCCREDENTIALS;;
+extern int32_t PBAAS_PORT;
 
 #endif

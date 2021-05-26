@@ -280,8 +280,6 @@ bool ShieldToAddress::operator()(const libzcash::SaplingPaymentAddress &zaddr) c
     // Send all value to the target z-addr
     m_op->builder_.SendChangeTo(zaddr, ovk);
 
-    
-
     // Build the transaction
     m_op->tx_ = m_op->builder_.Build().GetTxOrThrow();
 

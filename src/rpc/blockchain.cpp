@@ -23,6 +23,7 @@
 #include "script/sign.h"
 #include "script/standard.h"
 #include "wallet/wallet.h"
+#include "pbaas/pbaas.h"
 
 #include <stdint.h>
 
@@ -33,7 +34,6 @@
 using namespace std;
 
 extern void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry);
-void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fIncludeHex, bool fIncludeAsm=true);
 int32_t komodo_longestchain();
 
 double GetDifficultyINTERNAL(const CBlockIndex* blockindex, bool networkDifficulty)
@@ -875,8 +875,12 @@ UniValue getblock(const UniValue& params, bool fHelp)
         std::string strHex = HexStr(ssBlock.begin(), ssBlock.end());
         return strHex;
     }
-
-    return blockToJSON(block, pblockindex, verbosity >= 2);
+    UniValue blockUni = blockToJSON(block, pblockindex, verbosity >= 2);
+    if (pblockindex)
+    {
+        blockUni.pushKV("proofroot", CProofRoot::GetProofRoot(pblockindex->GetHeight()).ToUniValue());
+    }
+    return blockUni;
 }
 
 UniValue gettxoutsetinfo(const UniValue& params, bool fHelp)
@@ -1395,7 +1399,9 @@ UniValue getblockchaininfo(const UniValue& params, bool fHelp)
             "consensus.chaintip != consensus.nextblock.\n"
             "\nResult:\n"
             "{\n"
-            "  \"chain\": \"xxxx\",        (string) current network name as defined in BIP70 (main, test, regtest)\n"
+            "  \"chain\": \"xxxx\",        (string) current network type of blockchain (main, test, regtest)\n"
+            "  \"name\": \"xxxx\",         (string) current network name of blockchain ID (VRSC, VRSCTEST, PBAASNAME)\n"
+            "  \"chainid\": \"xxxx\",      (string) blockchain ID (i-address of the native blockchain currency)\n"
             "  \"blocks\": xxxxxx,         (numeric) the current number of blocks processed in the server\n"
             "  \"headers\": xxxxxx,        (numeric) the current number of headers we have validated\n"
             "  \"bestblockhash\": \"...\", (string) the hash of the currently best block\n"
@@ -1444,7 +1450,9 @@ UniValue getblockchaininfo(const UniValue& params, bool fHelp)
 	    progress = (longestchain > 0 ) ? (double) chainActive.Height() / longestchain : 1.0;
     }
     UniValue obj(UniValue::VOBJ);
-    obj.push_back(Pair("chain",                 Params().NetworkIDString()));
+    obj.push_back(Pair("chain",                 PBAAS_TESTMODE ? "test" : "main"));
+    obj.push_back(Pair("name",                  ConnectedChains.ThisChain().name));
+    obj.push_back(Pair("chainid",               EncodeDestination(CIdentityID(ConnectedChains.ThisChain().GetID()))));
     obj.push_back(Pair("blocks",                (int)chainActive.Height()));
     obj.push_back(Pair("headers",               pindexBestHeader ? pindexBestHeader->GetHeight() : -1));
     obj.push_back(Pair("bestblockhash",         chainActive.LastTip()->GetBlockHash().GetHex()));

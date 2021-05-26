@@ -32,8 +32,7 @@
 #include "primitives/transaction.h"
 #include "arith_uint256.h"
 
-std::string CleanName(const std::string &Name, uint160 &Parent, bool displayapproved=false);
-std::vector<std::string> ParseSubNames(const std::string &Name, std::string &ChainOut, bool displayfilter=false, bool addVerus=true);
+std::string CleanName(const std::string &Name, uint160 &Parent, bool displayapproved=false, bool addVerus=true);
 
 class CCommitmentHash
 {
@@ -81,9 +80,14 @@ public:
     CNameReservation() {}
     CNameReservation(const std::string &Name, const CIdentityID &Referral, const uint256 &Salt) : name(Name.size() > MAX_NAME_SIZE ? std::string(Name.begin(), Name.begin() + MAX_NAME_SIZE) : Name), referral(Referral), salt(Salt) {}
 
-    CNameReservation(const UniValue &uni)
+    CNameReservation(const UniValue &uni, uint160 parent=ASSETCHAINS_CHAINID)
     {
-        uint160 parent;
+        uint160 dummy;
+        std::string parentStr = CleanName(uni_get_str(find_value(uni, "parent")), dummy);
+        if (!parentStr.empty())
+        {
+            parent = GetDestinationID(DecodeDestination(parentStr));
+        }
         name = CleanName(uni_get_str(find_value(uni, "name")), parent);
         salt = uint256S(uni_get_str(find_value(uni, "salt")));
         CTxDestination dest = DecodeDestination(uni_get_str(find_value(uni, "referral")));
@@ -99,7 +103,7 @@ public:
 
     CNameReservation(const CTransaction &tx, int *pNumOut=nullptr);
 
-    CNameReservation(std::vector<unsigned char> &asVector)
+    CNameReservation(const std::vector<unsigned char> &asVector)
     {
         ::FromVector(asVector, *this);
         if (name.size() > MAX_NAME_SIZE)
@@ -148,7 +152,8 @@ public:
     std::vector<CTxDestination> primaryAddresses;
     int32_t minSigs;
 
-    CPrincipal() : nVersion(VERSION_INVALID) {}
+    CPrincipal() : nVersion(VERSION_INVALID), flags(0) {}
+    CPrincipal(uint32_t Version, uint32_t Flags=0) : nVersion(Version), flags(Flags) {}
 
     CPrincipal(uint32_t Version,
                uint32_t Flags,
@@ -234,16 +239,28 @@ public:
         }       
         return false; 
     }
+
+    void SetVersion(uint32_t version)
+    {
+        nVersion = version;
+    }
 };
 
 class CIdentity : public CPrincipal
 {
 public:
-    static const uint32_t FLAG_REVOKED = 0x8000;
-    static const uint32_t FLAG_ACTIVECURRENCY = 0x0001;     // flag that is set when this ID is being used as an active currency name
+    enum
+    {
+        FLAG_REVOKED = 0x8000,              // set when this identity is revoked
+        FLAG_ACTIVECURRENCY = 0x1,          // flag that is set when this ID is being used as an active currency name
+        FLAG_LOCKED = 0x2,                  // set when this identity is locked
+        MAX_UNLOCK_DELAY = 60 * 24 * 22 * 365 // 21+ year maximum unlock time for an ID
+    };
+
     static const int MAX_NAME_LEN = 64;
 
-    uint160 parent;
+    uint160 parent;                         // parent in the sense of name. this could be a currency or chain.
+    uint160 systemID;                       // system that this ID is homed to, enabling separate parent and system
 
     // real name or pseudonym, must be unique on the blockchain on which it is defined and can be used
     // as a name for blockchains or other purposes on any chain in the Verus ecosystem once exported to
@@ -273,7 +290,9 @@ public:
     // z-addresses for contact and privately made attestations that can be proven to others
     std::vector<libzcash::SaplingPaymentAddress> privateAddresses;
 
-    CIdentity() : CPrincipal() {}
+    uint32_t unlockAfter;
+
+    CIdentity() : CPrincipal(), unlockAfter(0) {}
 
     CIdentity(uint32_t Version,
               uint32_t Flags,
@@ -284,13 +303,17 @@ public:
               const std::vector<std::pair<uint160, uint256>> &hashes,
               const uint160 &Revocation,
               const uint160 &Recovery,
-              const std::vector<libzcash::SaplingPaymentAddress> &Inboxes = std::vector<libzcash::SaplingPaymentAddress>()) : 
+              const std::vector<libzcash::SaplingPaymentAddress> &PrivateAddresses = std::vector<libzcash::SaplingPaymentAddress>(),
+              const uint160 &SystemID=ASSETCHAINS_CHAINID,
+              int32_t unlockTime=0) : 
               CPrincipal(Version, Flags, primary, minPrimarySigs),
               parent(Parent),
               name(Name),
               revocationAuthority(Revocation),
               recoveryAuthority(Recovery),
-              privateAddresses(Inboxes)
+              privateAddresses(PrivateAddresses),
+              systemID(SystemID),
+              unlockAfter(unlockTime)
     {
         for (auto &entry : hashes)
         {
@@ -352,6 +375,29 @@ public:
         READWRITE(revocationAuthority);
         READWRITE(recoveryAuthority);
         READWRITE(privateAddresses);
+
+        if (nVersion >= VERSION_PBAAS)
+        {
+            READWRITE(systemID);
+            READWRITE(unlockAfter);
+        }
+        else if (ser_action.ForRead())
+        {
+            REF(unlockAfter) = 0;
+            REF(systemID) = parent.IsNull() ? GetID() : parent;
+        }
+    }
+
+    uint160 GetSystemID() const
+    {
+        if (nVersion >= VERSION_PBAAS)
+        {
+            return parent;
+        }
+        else
+        {
+            return systemID;
+        }
     }
 
     UniValue ToUniValue() const;
@@ -359,6 +405,7 @@ public:
     void Revoke()
     {
         flags |= FLAG_REVOKED;
+        Unlock(0, 0);
     }
 
     void Unrevoke()
@@ -369,6 +416,64 @@ public:
     bool IsRevoked() const
     {
         return flags & FLAG_REVOKED;
+    }
+
+    void Lock(int32_t unlockTime)
+    {
+        if (unlockTime <= 0)
+        {
+            unlockTime = 1;
+        }
+        else if (unlockTime > MAX_UNLOCK_DELAY)
+        {
+            unlockTime = MAX_UNLOCK_DELAY;
+        }
+        flags |= FLAG_LOCKED;
+        unlockAfter = unlockTime;
+    }
+
+    void Unlock(uint32_t height, uint32_t txExpiryHeight)
+    {
+        if (IsRevoked())
+        {
+            flags &= ~FLAG_LOCKED;
+            unlockAfter = 0;
+        }
+        else if (IsLocked())
+        {
+            flags &= ~FLAG_LOCKED;
+            unlockAfter += txExpiryHeight;
+        }
+        else if (height > unlockAfter)
+        {
+            unlockAfter = 0;
+        }
+        if (unlockAfter > (txExpiryHeight + MAX_UNLOCK_DELAY))
+        {
+            unlockAfter = txExpiryHeight + MAX_UNLOCK_DELAY;
+        }
+    }
+
+    // This only returns the state of the lock flag. Note that an ID stays locked from spending or
+    // signing until the height it was unlocked plus the time lock applied when it was locked.
+    bool IsLocked() const
+    {
+        return flags & FLAG_LOCKED;
+    }
+
+    // consider the unlockAfter height as well
+    // this continues to return that it is locked after it is unlocked
+    // until passed the parameter of the height at which it was unlocked, plus the time lock
+    bool IsLocked(uint32_t height) const
+    {
+        return nVersion >= VERSION_PBAAS &&
+               (IsLocked() || unlockAfter >= height) &&
+               !IsRevoked();
+    }
+
+    int32_t UnlockHeight() const
+    {
+        return unlockAfter;
     }
 
     void ActivateCurrency()
@@ -392,7 +497,12 @@ public:
 
     bool IsValid() const
     {
-        return CPrincipal::IsValid() && name.size() > 0 && (name.size() <= MAX_NAME_LEN);
+        return CPrincipal::IsValid() && name.size() > 0 && 
+               (name.size() <= MAX_NAME_LEN) &&
+               primaryAddresses.size() &&
+               (nVersion < VERSION_PBAAS ||
+               (!revocationAuthority.IsNull() &&
+                !recoveryAuthority.IsNull()));
     }
 
     bool IsValidUnrevoked() const
@@ -448,22 +558,78 @@ public:
     static CScript TransparentOutput(const CIdentityID &destinationID);
 
     // creates an output script to control updates to this identity
-    CScript IdentityUpdateOutputScript() const;
+    CScript IdentityUpdateOutputScript(uint32_t height) const;
 
-    bool IsInvalidMutation(const CIdentity &newIdentity, uint32_t height) const
+    bool IsInvalidMutation(const CIdentity &newIdentity, uint32_t height, uint32_t expiryHeight) const
     {
         auto nSolVersion = CConstVerusSolutionVector::GetVersionByHeight(height);
         if (parent != newIdentity.parent ||
             (nSolVersion < CActivationHeight::ACTIVATE_IDCONSENSUS2 && name != newIdentity.name) ||
-            (nSolVersion < CActivationHeight::ACTIVATE_PBAAS && newIdentity.HasActiveCurrency()) ||
+            (nSolVersion >= CActivationHeight::ACTIVATE_IDCONSENSUS2 &&
+             nSolVersion < CActivationHeight::ACTIVATE_PBAAS && 
+             (newIdentity.HasActiveCurrency() || 
+              newIdentity.IsLocked() ||
+              newIdentity.nVersion >= VERSION_PBAAS)) ||
+            (nSolVersion >= CActivationHeight::ACTIVATE_PBAAS && (newIdentity.nVersion < VERSION_PBAAS ||
+                                                                  (newIdentity.systemID != (nVersion < VERSION_PBAAS ? parent : systemID)))) ||
             GetID() != newIdentity.GetID() ||
             ((newIdentity.flags & ~FLAG_REVOKED) && (newIdentity.nVersion == VERSION_FIRSTVALID)) ||
-            ((newIdentity.flags & ~(FLAG_REVOKED + FLAG_ACTIVECURRENCY)) && (newIdentity.nVersion >= VERSION_PBAAS)) ||
+            ((newIdentity.flags & ~(FLAG_REVOKED + FLAG_ACTIVECURRENCY + FLAG_LOCKED)) && (newIdentity.nVersion >= VERSION_PBAAS)) ||
+            (IsLocked(height) && (!newIdentity.IsRevoked() && !newIdentity.IsLocked(height))) ||
             ((flags & FLAG_ACTIVECURRENCY) && !(newIdentity.flags & FLAG_ACTIVECURRENCY)) ||
             newIdentity.nVersion < VERSION_FIRSTVALID ||
             newIdentity.nVersion > VERSION_LASTVALID)
         {
             return true;
+        }
+
+        // we cannot unlock instantly unless we are revoked, we also cannot relock
+        // to enable an earlier unlock time
+        if (newIdentity.nVersion >= VERSION_PBAAS)
+        {
+            if (IsLocked(height))
+            {
+                if (!newIdentity.IsRevoked())
+                {
+                    if (IsLocked() && !newIdentity.IsLocked())
+                    {
+                        if ((newIdentity.unlockAfter != (unlockAfter + expiryHeight)) &&
+                            !(unlockAfter > MAX_UNLOCK_DELAY && newIdentity.unlockAfter == (MAX_UNLOCK_DELAY + expiryHeight)))
+                        {
+                            return true;
+                        }
+                    }
+                    else if (!IsLocked())
+                    {
+                        // only revocation can change unlock after time, and we don't allow re-lock to an earlier time until unlock either, 
+                        // which can change the new unlock time
+                        if (newIdentity.IsLocked())
+                        {
+                            if ((expiryHeight + newIdentity.unlockAfter < unlockAfter))
+                            {
+                                return true;
+                            }
+                        }
+                        else if (newIdentity.unlockAfter != unlockAfter)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            else if (newIdentity.IsLocked(height))
+            {
+                if (newIdentity.IsLocked() && newIdentity.unlockAfter > MAX_UNLOCK_DELAY)
+                {
+                    return true;
+                }
+                else if (!newIdentity.IsLocked() && newIdentity.unlockAfter <= expiryHeight)
+                {
+                    // we never set the locked bit, but we are counting down to the block set to unlock
+                    // cannot lock with unlock before the expiry height
+                    return true;
+                }
+            }
         }
         return false;
     }
@@ -471,11 +637,14 @@ public:
     bool IsPrimaryMutation(const CIdentity &newIdentity, uint32_t height) const
     {
         auto nSolVersion = CConstVerusSolutionVector::GetVersionByHeight(height);
+        bool isRevokedExempt = nSolVersion >= CActivationHeight::ACTIVATE_PBAAS && newIdentity.IsRevoked();
         if (CPrincipal::IsPrimaryMutation(newIdentity) ||
             (nSolVersion >= CActivationHeight::ACTIVATE_IDCONSENSUS2 && name != newIdentity.name && GetID() == newIdentity.GetID()) ||
             contentMap != newIdentity.contentMap ||
             privateAddresses != newIdentity.privateAddresses ||
-            (HasActiveCurrency() != newIdentity.HasActiveCurrency()))
+            (unlockAfter != newIdentity.unlockAfter && (!isRevokedExempt || newIdentity.unlockAfter != 0)) ||
+            (HasActiveCurrency() != newIdentity.HasActiveCurrency()) ||
+            (IsLocked() != newIdentity.IsLocked() && (!isRevokedExempt || newIdentity.IsLocked())))
         {
             return true;
         }
@@ -515,8 +684,9 @@ public:
     {
         auto nSolVersion = CConstVerusSolutionVector::GetVersionByHeight(height);
         if (recoveryAuthority != newIdentity.recoveryAuthority ||
-            (revocationAuthority != newIdentity.revocationAuthority &&
-            (nSolVersion >= CActivationHeight::ACTIVATE_IDCONSENSUS2 && IsRevoked())))
+            (IsRevoked() &&
+             ((nSolVersion >= CActivationHeight::ACTIVATE_IDCONSENSUS2 && revocationAuthority != newIdentity.revocationAuthority) ||
+              IsPrimaryMutation(newIdentity, height))))
         {
             return true;
         }
@@ -614,74 +784,25 @@ public:
     }
 };
 
-// an identity signature is a compound signature consisting of the block height of its creation, and one or more cryptographic 
-// signatures of the controlling addresses. validation can be performed based on the validity when signed, using the block height
-// stored in the signature instance, or based on the continued signature validity of the current identity, which may automatically
-// invalidate when the identity is updated.
-class CIdentitySignature
+class CCurrencyRegistrationDestination
 {
 public:
-    enum {
-        VERSION_INVALID = 0,
-        VERSION_VERUSID = 1,
-        VERSION_FIRST = 1,
-        VERSION_LAST = 1
-    };
-    uint8_t version;
-    uint32_t blockHeight;
-    std::set<std::vector<unsigned char>> signatures;
+    CIdentity identity;
+    CCurrencyDefinition currency;
 
-    CIdentitySignature() : version(VERSION_VERUSID), blockHeight(0) {}
-    CIdentitySignature(uint32_t height, const std::vector<unsigned char> &oneSig) : version(VERSION_VERUSID), blockHeight(height), signatures({oneSig}) {}
-    CIdentitySignature(uint32_t height, const std::set<std::vector<unsigned char>> &sigs) : version(VERSION_VERUSID), blockHeight(height), signatures(sigs) {}
-    CIdentitySignature(const std::vector<unsigned char> &asVector)
-    {
-        ::FromVector(asVector, *this);
-    }
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(version);
-        if (version <= VERSION_LAST && version >= VERSION_FIRST)
-        {
-            READWRITE(blockHeight);
-            std::vector<std::vector<unsigned char>> sigs;
-            if (ser_action.ForRead())
-            {
-                READWRITE(sigs);
-
-                for (auto &oneSig : sigs)
-                {
-                    signatures.insert(oneSig);
-                }
-            }
-            else
-            {
-                for (auto &oneSig : signatures)
-                {
-                    sigs.push_back(oneSig);
-                }
-
-                READWRITE(sigs);
-            }
-        }
-    }
+    CCurrencyRegistrationDestination() {}
+    CCurrencyRegistrationDestination(const CIdentity &Identity, const CCurrencyDefinition &Currency) : identity(Identity), currency(Currency) {}
 
     ADD_SERIALIZE_METHODS;
 
-    void AddSignature(const std::vector<unsigned char> &signature)
-    {
-        signatures.insert(signature);
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(identity);
+        READWRITE(currency);
     }
-    
-    uint32_t Version()
+    bool IsValid() const
     {
-        return version;
-    }
-
-    uint32_t IsValid()
-    {
-        return version <= VERSION_LAST && version >= VERSION_FIRST;
+        return identity.IsValid() && currency.IsValid() && identity.GetID() == currency.GetID();
     }
 };
 

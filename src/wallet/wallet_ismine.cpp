@@ -37,7 +37,7 @@ isminetype IsMine(const CKeyStore &keystore, const CTxDestination& dest)
     return IsMine(keystore, script);
 }
 
-isminetype IsMine(const CKeyStore &keystore, const CScript& _scriptPubKey)
+isminetype IsMine(const CKeyStore &keystore, const CScript& _scriptPubKey, uint32_t height)
 {
     vector<valtype> vSolutions;
     txnouttype whichType;
@@ -60,7 +60,7 @@ isminetype IsMine(const CKeyStore &keystore, const CScript& _scriptPubKey)
         bool canSign = false;
         bool canSpend = false;
 
-        if (ExtractDestinations(scriptPubKey, whichType, dests, minSigs, &keystore, &canSign, &canSpend))
+        if (ExtractDestinations(scriptPubKey, whichType, dests, minSigs, &keystore, &canSign, &canSpend, height))
         {
             if (canSpend)
             {

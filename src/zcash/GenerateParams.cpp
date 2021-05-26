@@ -4,6 +4,7 @@
 #include "crypto/common.h"
 
 int64_t MAX_MONEY = 200000000 * 100000000LL;
+int64_t MAX_SUPPLY = 50000000000LL * 100000000LL;
 
 int main(int argc, char **argv)
 {

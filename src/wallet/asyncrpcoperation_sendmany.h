@@ -25,11 +25,8 @@
 
 using namespace libzcash;
 
-// A recipient is a tuple of address, amount, memo (optional if zaddr)
-typedef std::tuple<std::string, CAmount, std::string> SendManyRecipient;
-
-// Input UTXO is a tuple (quadruple) of txid, vout, amount, coinbase)
-typedef std::tuple<uint256, int, CAmount, bool, CScript> SendManyInputUTXO;
+// A recipient is a tuple of address, amount, memo (optional if zaddr), and CScript (optional and only if taddr)
+typedef std::tuple<std::string, CAmount, std::string, CScript> SendManyRecipient;
 
 // Input JSOP is a tuple of JSOutpoint, note and amount
 typedef std::tuple<JSOutPoint, SproutNote, CAmount> SendManyInputJSOP;
@@ -60,7 +57,8 @@ public:
         std::vector<SendManyRecipient> zOutputs,
         int minDepth,
         CAmount fee = ASYNC_RPC_OPERATION_DEFAULT_MINERS_FEE,
-        UniValue contextInfo = NullUniValue);
+        UniValue contextInfo = NullUniValue,
+        bool fromsendcurrency=false);
     virtual ~AsyncRPCOperation_sendmany();
     
     // We don't want to be copied or moved around
@@ -73,8 +71,8 @@ public:
 
     virtual UniValue getStatus() const;
 
-    bool testmode = false;  // Set to true to disable sending txs and generating proofs
-
+    bool testmode = false;              // Set to true to disable sending txs and generating proofs
+    bool sendCurrency = false;          // set to true if this is from the "sendcurrency" API
     bool paymentDisclosureMode = false; // Set to true to save esk for encrypted notes in payment disclosure database.
 
 private:
@@ -101,7 +99,8 @@ private:
 
     std::vector<SendManyRecipient> t_outputs_;
     std::vector<SendManyRecipient> z_outputs_;
-    std::vector<SendManyInputUTXO> t_inputs_;
+    std::vector<uint256> t_inputs_txids_;       // this is to ensure that between locks, we haven't deleted the tx from the wallet
+    std::vector<COutput> t_inputs_;
     std::vector<SendManyInputJSOP> z_sprout_inputs_;
     std::vector<SaplingNoteEntry> z_sapling_inputs_;
 

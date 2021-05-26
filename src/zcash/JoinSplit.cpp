@@ -18,6 +18,7 @@
 #include "sync.h"
 #include "amount.h"
 extern int64_t MAX_MONEY;
+extern int64_t MAX_SUPPLY;
 
 #include "librustzcash.h"
 #include "streams.h"

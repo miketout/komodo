@@ -415,8 +415,17 @@ UniValue importwallet_impl(const UniValue& params, bool fHelp, bool fImportZKeys
     pwalletMain->ShowProgress("", 100); // hide progress dialog in GUI
 
     CBlockIndex *pindex = chainActive.LastTip();
-    while (pindex && pindex->pprev && pindex->GetBlockTime() > nTimeBegin - 7200)
-        pindex = pindex->pprev;
+
+    // if the chain is less than 1000 blocks, scan the whole thing
+    if (chainActive.Height() < 1000)
+    {
+        pindex = chainActive.Genesis();
+    }
+    else
+    {
+        while (pindex && pindex->pprev && pindex->GetBlockTime() > nTimeBegin - 7200)
+            pindex = pindex->pprev;
+    }
 
     if (!pwalletMain->nTimeFirstKey || nTimeBegin < pwalletMain->nTimeFirstKey)
         pwalletMain->nTimeFirstKey = nTimeBegin;

@@ -119,7 +119,8 @@ public:
     bool Set(const CPubKey &key);
     bool Set(const CScriptID &id);
     bool Set(const CIdentityID& id);
-    bool Set(const CQuantumID& id);
+    bool Set(const CIndexID &id);
+    bool Set(const CQuantumID &id);
     bool Set(const CTxDestination &dest);
     bool IsValid() const;
     bool IsValid(const CChainParams &params) const;

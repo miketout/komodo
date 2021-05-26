@@ -216,6 +216,7 @@ BITCOIN_CORE_H = \
   netbase.h \
   noui.h \
   pbaas/crosschainrpc.h \
+  pbaas/vdxf.h \
   pbaas/identity.h \
   pbaas/notarization.h \
   pbaas/pbaas.h \
@@ -466,10 +467,10 @@ endif
 
 # Verus hash specific library - optimized
 if ARCH_ARM
-crypto_libverus_crypto_a_CPPFLAGS = -O3 -Wint-conversion -g -march=armv8.1-a+crypto -flax-vector-conversions -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS)
+crypto_libverus_crypto_a_CPPFLAGS = -O3 -g -march=armv8.1-a+crypto -flax-vector-conversions -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 crypto_libverus_crypto_a_CXXFLAGS = -O3 -Wint-conversion -g -march=armv8.1-a+crypto -flax-vector-conversions -funroll-loops -fomit-frame-pointer -fPIC $(AM_CXXFLAGS)
 else
-crypto_libverus_crypto_a_CPPFLAGS = -O3 -Wint-conversion -mpclmul -msse4 -msse4.1 -msse4.2 -mssse3 -mavx -maes -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS)
+crypto_libverus_crypto_a_CPPFLAGS = -O3 -mpclmul -msse4 -msse4.1 -msse4.2 -mssse3 -mavx -maes -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 crypto_libverus_crypto_a_CXXFLAGS = -O3 -Wint-conversion -mpclmul -msse4 -msse4.1 -msse4.2 -mssse3 -mavx -maes -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CXXFLAGS)
 endif
 
@@ -481,10 +482,10 @@ crypto_libverus_crypto_a_SOURCES = \
 
 # Verus hash specific library - portable
 if ARCH_ARM
-crypto_libverus_portable_crypto_a_CPPFLAGS = -O3 -Wint-conversion -g -march=$(PLATFORM_VARIANT) -flax-vector-conversions -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS)
+crypto_libverus_portable_crypto_a_CPPFLAGS = -O3 -g -march=$(PLATFORM_VARIANT) -flax-vector-conversions -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 crypto_libverus_portable_crypto_a_CXXFLAGS = -O3 -Wint-conversion -g -march=$(PLATFORM_VARIANT) -flax-vector-conversions -funroll-loops -fomit-frame-pointer -fPIC $(AM_CXXFLAGS)
 else
-crypto_libverus_portable_crypto_a_CPPFLAGS = -O3 -Wint-conversion -march=$(PLATFORM_VARIANT) -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS) -w
+crypto_libverus_portable_crypto_a_CPPFLAGS = -O3 -march=$(PLATFORM_VARIANT) -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CPPFLAGS) -w $(BITCOIN_INCLUDES)
 crypto_libverus_portable_crypto_a_CXXFLAGS = -O3 -Wint-conversion -march=$(PLATFORM_VARIANT) -g -funroll-loops -fomit-frame-pointer -fPIC $(AM_CXXFLAGS)
 endif
 
@@ -523,6 +524,7 @@ libbitcoin_common_a_SOURCES = \
   metrics.cpp \
   mmr.cpp \
   pbaas/crosschainrpc.cpp \
+  pbaas/vdxf.cpp \
   primitives/block.cpp \
   primitives/transaction.cpp \
   primitives/nonce.cpp \
@@ -673,9 +675,9 @@ verus_LDADD = \
 
 if ENABLE_WALLET
 wallet_utility_LDADD = \
-	libbitcoin_wallet.a \
-  $(LIBUNIVALUE) \
+	$(LIBBITCOIN_WALLET) \
 	$(LIBBITCOIN_COMMON) \
+  $(LIBUNIVALUE) \
 	$(LIBBITCOIN_CRYPTO) \
 	$(LIBVERUS_CRYPTO) \
 	$(LIBVERUS_PORTABLE_CRYPTO) \
@@ -684,6 +686,7 @@ wallet_utility_LDADD = \
 	$(BOOST_LIBS) \
 	$(BDB_LIBS) \
 	$(CRYPTO_LIBS) \
+	$(EVENT_LIBS) \
 	$(LIBZCASH) \
 	$(LIBSNARK) \
 	$(LIBZCASH_LIBS)\
@@ -705,6 +708,7 @@ verus_tx_LDADD = \
 	$(BOOST_LIBS) \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_UTIL) \
+	$(EVENT_LIBS) \
   $(LIBSECP256K1) \
   $(LIBZCASH) \
   $(LIBSNARK) \

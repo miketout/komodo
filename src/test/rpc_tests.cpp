@@ -457,8 +457,6 @@ BOOST_AUTO_TEST_CASE(rpc_insightexplorer)
     // revert
     fExperimentalMode = false;
     fInsightExplorer = false;
-    fAddressIndex = false;
-    fSpentIndex = false;
     fTimestampIndex = false;
 }
 

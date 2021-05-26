@@ -1323,7 +1323,7 @@ void iguana_initQ(queue_t *Q,char *name)
         free(item);
 }
 
-uint16_t _komodo_userpass(char *username,char *password,FILE *fp)
+uint16_t _komodo_userpass(char *username,char *password, FILE *fp)
 {
     char *rpcuser,*rpcpassword,*str,line[8192]; uint16_t port = 0;
     rpcuser = rpcpassword = 0;
@@ -1359,11 +1359,18 @@ uint16_t _komodo_userpass(char *username,char *password,FILE *fp)
 void komodo_statefname(char *fname,char *symbol,char *str)
 {
     int32_t n,len;
-    sprintf(fname,"%s",GetDataDir(false).string().c_str());
-    if ( (n= (int32_t)strlen(ASSETCHAINS_SYMBOL)) != 0 )
+    std::string checkName = std::string(symbol);
+    if (checkName != "VRSC")
+    {
+        checkName = boost::to_lower_copy(std::string(ASSETCHAINS_SYMBOL));
+    }
+
+    const char *chkName = checkName.c_str();
+    sprintf(fname, "%s", GetDataDir(false).string().c_str());
+    if ( (n = (int32_t)strlen(chkName)) != 0 )
     {
         len = (int32_t)strlen(fname);
-        if ( strcmp(ASSETCHAINS_SYMBOL,&fname[len - n]) == 0 )
+        if ( strcmp(chkName, &fname[len - n]) == 0 )
             fname[len - n] = 0;
         else
         {
@@ -1381,7 +1388,7 @@ void komodo_statefname(char *fname,char *symbol,char *str)
     }
     if ( symbol != 0 && symbol[0] != 0 && strcmp("KMD",symbol) != 0 )
     {
-        strcat(fname,symbol);
+        strcat(fname, symbol);
         //printf("statefname.(%s) -> (%s)\n",symbol,fname);
 #ifdef _WIN32
         strcat(fname,"\\");
@@ -1397,16 +1404,22 @@ void komodo_statefname(char *fname,char *symbol,char *str)
 // be the case when loading without VRSC active.
 void komodo_configfile(char *symbol, uint16_t rpcport)
 {
-    static char myusername[512],mypassword[7168];
+    std::string fileName(symbol);
+    if (fileName != "VRSC")
+    {
+        fileName = boost::to_lower_copy(fileName);
+    }
+    const char *_symbol = fileName.c_str();
+    static char myusername[512], mypassword[7168];
     FILE *fp; uint16_t kmdport; uint8_t buf2[33]; char fname[512],buf[128],username[512],password[7168]; uint32_t crc,r,r2,i;
-    if ( symbol != 0 && rpcport != 0 )
+    if ( !fileName.empty() && rpcport != 0 )
     {
         r = (uint32_t)time(NULL);
         r2 = OS_milliseconds();
         memcpy(buf,&r,sizeof(r));
         memcpy(&buf[sizeof(r)],&r2,sizeof(r2));
-        memcpy(&buf[sizeof(r)+sizeof(r2)],symbol,strlen(symbol));
-        crc = calc_crc32(0,(uint8_t *)buf,(int32_t)(sizeof(r)+sizeof(r2)+strlen(symbol)));
+        memcpy(&buf[sizeof(r)+sizeof(r2)], _symbol, strlen(_symbol));
+        crc = calc_crc32(0,(uint8_t *)buf,(int32_t)(sizeof(r)+sizeof(r2)+strlen(_symbol)));
 				#ifdef _WIN32
 				randombytes_buf(buf2,sizeof(buf2));
 				#else
@@ -1415,12 +1428,12 @@ void komodo_configfile(char *symbol, uint16_t rpcport)
         for (i=0; i<sizeof(buf2); i++)
             sprintf(&password[i*2],"%02x",buf2[i]);
         password[i*2] = 0;
-        sprintf(buf,"%s.conf",symbol);
+        sprintf(buf,"%s.conf", _symbol);
         BITCOIND_RPCPORT = rpcport;
 #ifdef _WIN32
-        sprintf(fname,"%s\\%s",GetDataDir(false).string().c_str(),buf);
+        sprintf(fname,"%s\\%s",GetDataDir(false).string().c_str(), buf);
 #else
-        sprintf(fname,"%s/%s",GetDataDir(false).string().c_str(),buf);
+        sprintf(fname,"%s/%s",GetDataDir(false).string().c_str(), buf);
 #endif
         if ( (fp= fopen(fname,"rb")) == 0 )
         {
@@ -1430,20 +1443,12 @@ void komodo_configfile(char *symbol, uint16_t rpcport)
                 fprintf(fp,"rpcuser=user%u\nrpcpassword=pass%s\nrpcport=%u\nserver=1\ntxindex=1\nrpcworkqueue=256\nrpcallowip=127.0.0.1\nrpchost=127.0.0.1\n",crc,password,rpcport);
 
                 // add basic chain parameters for non-VRSC chains
-                if (_IsVerusActive())
-                {
-                    // add Verus Coin Foundation sponsored testnet nodes
-                    if (PBAAS_TESTMODE)
-                    {
-                        //fprintf(fp,"addnode=%s\n", "185.25.48.72:18969");
-                        //fprintf(fp,"addnode=%s\n", "185.64.105.111:18969");
-                    }
-                }
-                else
+                if (!_IsVerusActive())
                 {
                     const char *charPtr;
                     // basic coin parameters. the rest will come from block 1
                     fprintf(fp,"ac_algo=verushash\nac_veruspos=50\nac_cc=1\n");
+                    fprintf(fp,"launchsystemid=%s\n", EncodeDestination(CIdentityID(ConnectedChains.thisChain.launchSystemID)).c_str());
                     fprintf(fp,"startblock=%d\n", ConnectedChains.thisChain.startBlock);
                     fprintf(fp,"endblock=%d\n", ConnectedChains.thisChain.endBlock);
                     fprintf(fp,"ac_supply=%s\n", (charPtr = mapArgs["-ac_supply"].c_str())[0] == 0 ? "0" : charPtr);
@@ -1476,7 +1481,7 @@ void komodo_configfile(char *symbol, uint16_t rpcport)
         }
         else
         {
-            _komodo_userpass(myusername,mypassword,fp);
+            _komodo_userpass(myusername, mypassword, fp);
             mapArgs["-rpcpassword"] = mypassword;
             mapArgs["-rpcusername"] = myusername;
             //fprintf(stderr,"myusername.(%s)\n",myusername);
@@ -1497,7 +1502,7 @@ void komodo_configfile(char *symbol, uint16_t rpcport)
     strcat(fname,"komodo.conf");
 #endif
 #endif
-    if ( (fp= fopen(fname,"rb")) != 0 )
+    if ( (fp = fopen(fname,"rb")) != 0 )
     {
         if ( (kmdport= _komodo_userpass(username,password,fp)) != 0 )
             KMD_PORT = kmdport;
@@ -1507,20 +1512,17 @@ void komodo_configfile(char *symbol, uint16_t rpcport)
     } //else printf("couldnt open.(%s)\n",fname);
 }
 
-uint16_t komodo_userpass(char *userpass,char *symbol)
+uint16_t komodo_userpass(char *userpass, char *symbol)
 {
-    FILE *fp; uint16_t port = 0; char fname[512],username[512],password[512],confname[KOMODO_ASSETCHAIN_MAXLEN];
+    FILE *fp; uint16_t port = 0; char fname[512],username[512],password[512],confname[KOMODO_ASSETCHAIN_MAXLEN + 5];
     userpass[0] = 0;
-    if ( strcmp("KMD",symbol) == 0 )
+    std::string fileName(symbol);
+    if (fileName != "VRSC")
     {
-#ifdef __APPLE__
-        sprintf(confname,"Komodo.conf");
-#else
-        sprintf(confname,"komodo.conf");
-#endif
+        fileName = boost::to_lower_copy(fileName);
     }
-    else sprintf(confname,"%s.conf",symbol);
-    komodo_statefname(fname,symbol,confname);
+    sprintf(confname, "%s.conf", fileName.c_str());
+    komodo_statefname(fname, symbol, confname);
     if ( (fp= fopen(fname,"rb")) != 0 )
     {
         port = _komodo_userpass(username,password,fp);
@@ -1534,12 +1536,16 @@ uint16_t komodo_userpass(char *userpass,char *symbol)
 
 uint32_t komodo_assetmagic(char *symbol,uint64_t supply,uint8_t *extraptr,int32_t extralen)
 {
+    std::string name(symbol);
+    if (name != "VRSC")
+    {
+        name = boost::to_lower_copy(name);
+    }
     uint8_t buf[512]; uint32_t crc0=0; int32_t len = 0; bits256 hash;
-    if ( strcmp(symbol,"KMD") == 0 )
-        return(0x8de4eef9);
+
     len = iguana_rwnum(1,&buf[len],sizeof(supply),(void *)&supply);
-    strcpy((char *)&buf[len],symbol);
-    len += strlen(symbol);
+    strcpy((char *)&buf[len], name.c_str());
+    len += strlen(name.c_str());
     if ( extraptr != 0 && extralen != 0 )
     {
         vcalc_sha256(0,hash.bytes,extraptr,extralen);
@@ -1566,11 +1572,6 @@ uint16_t komodo_assetport(uint32_t magic,int32_t extralen)
 
 uint16_t komodo_port(char *symbol,uint64_t supply,uint32_t *magicp,uint8_t *extraptr,int32_t extralen)
 {
-    if ( symbol == 0 || symbol[0] == 0 || strcmp("KMD",symbol) == 0 )
-    {
-        *magicp = 0x8de4eef9;
-        return(7770);
-    }
     *magicp = komodo_assetmagic(symbol,supply,extraptr,extralen);
     return(komodo_assetport(*magicp,extralen));
 }
@@ -1701,6 +1702,7 @@ uint64_t komodo_ac_block_subsidy(int nHeight)
 }
 
 extern int64_t MAX_MONEY;
+extern int64_t MAX_SUPPLY;
 extern std::string VERUS_DEFAULT_ZADDR;
 bool SetThisChain(const UniValue &chainDefinition);
 const uint256 &CurrencyDefHash();
@@ -1709,7 +1711,7 @@ void komodo_args(char *argv0)
 {
     extern const char *Notaries_elected1[][2];
 
-    std::string name, addn; 
+    std::string name; 
     char *dirname,fname[512],arg0str[64],magicstr[9]; 
     uint8_t magic[4],extrabuf[384],*extraptr=0; FILE *fp; 
     uint64_t val; 
@@ -1750,9 +1752,6 @@ void komodo_args(char *argv0)
         //KOMODO_PAX = 1;
     } //else KOMODO_PAX = GetArg("-pax",0);
 
-    // either the testmode parameter or calling this chain VRSCTEST will put us into testmode
-    PBAAS_TESTMODE = GetBoolArg("-testmode", false);
-
     /*
     if ( argv0 != 0 )
     {
@@ -1770,26 +1769,41 @@ void komodo_args(char *argv0)
     }
     */
 
+    // either the testmode parameter or calling this chain VRSCTEST will put us into testmode
+    PBAAS_TESTMODE = GetBoolArg("-testmode", false);
+
     // setting test mode also prevents the name of this chain from being set to VRSC
+
+    //printf("%s: initial name: %s\n", __func__, name.c_str());
 
     // for testnet release, default to testnet
     name = GetArg("-chain", name == "" ? "VRSC" : name);
-    //name = GetArg("-chain", name == "" ? "VRSC" : name);
-
     name = GetArg("-ac_name", name);
 
-    if (PBAAS_TESTMODE && name == "VRSC")
-    {
-        // for testnet release, default to testnet
-        name = "VRSCTEST";
-        PBAAS_TESTMODE = false;
-    }
-    else if (name == "VRSCTEST" && !PBAAS_TESTMODE)
+    std::string lowerName = boost::to_lower_copy(name);
+
+    if (lowerName != "vrsc")
     {
         PBAAS_TESTMODE = true;
     }
 
+    // both VRSC and VRSCTEST are names that cannot be
+    // used as alternate chain names
+    if ((PBAAS_TESTMODE && lowerName == "vrsc") || lowerName == "vrsctest")
+    {
+        // upper case name
+        name = "VRSCTEST";
+    }
+    else if (lowerName == "vrsc")
+    {
+        name = "VRSC";
+    }
+
+    //printf("%s: chain name: %s\n", __func__, name.c_str());
+
     mapArgs["-ac_name"] = name;
+    memset(ASSETCHAINS_SYMBOL, 0, sizeof(ASSETCHAINS_SYMBOL));
+    strcpy(ASSETCHAINS_SYMBOL, name.c_str());
 
     ASSETCHAINS_ALGO = ASSETCHAINS_VERUSHASH;
     ASSETCHAINS_LWMAPOS = 50;
@@ -1830,9 +1844,7 @@ void komodo_args(char *argv0)
         mapArgs["-ac_cc"] = "1";
         mapArgs["-ac_supply"] = "5000000000000000";
         mapArgs["-ac_eras"] = "1";
-        mapArgs["-ac_reward"] = "2400000000";
-        std::string halving = GetArg("-ac_halving", "283331"); // this assignment is required for an ARM compiler workaround
-        mapArgs["-ac_halving"] = halving;    // allow testing easily with different values here
+        mapArgs["-ac_reward"] = "1200000000";
         mapArgs["-ac_decay"] = "0";
         mapArgs["-ac_options"] = "72";       // OPTION_ID_REFERRALS + OPTION_CANBERESERVE
         mapArgs["-ac_end"] = "0";
@@ -1846,16 +1858,20 @@ void komodo_args(char *argv0)
         {
             LogPrintf("Config file for %s not found.\n", name.c_str());
         }
+
+        std::string halving = GetArg("-ac_halving", mapArgs.count("-ac_halving") ? mapArgs["-ac_halving"] : "2111115"); // this assignment is required for an ARM compiler workaround
+        mapArgs["-ac_halving"] = halving;    // allow testing easily with different values here
     }
     else
     {
+        map<string, string> settings;
+        map<string, vector<string>> settingsmulti;
+
         // this is a PBaaS chain, so look for an installation on the local file system or check the Verus daemon if it's running
         // printf("Reading config file for %s\n", name.c_str());
+        name = boost::to_lower_copy(name);
         if (!ReadConfigFile(name, mapArgs, mapMultiArgs))
         {
-            map<string, string> settings;
-            map<string, vector<string>> settingsmulti;
-
             // if we are requested to automatically load the information from the Verus chain, do it if we can find the daemon
             if (ReadConfigFile(PBAAS_TESTMODE ? "VRSCTEST" : "VRSC", settings, settingsmulti))
             {
@@ -1911,19 +1927,39 @@ void komodo_args(char *argv0)
                 exit(1);
             }
         }
+        else
+        {
+            // if we are requested to automatically load the information from the Verus chain, do it if we can find the daemon
+            if (ReadConfigFile(PBAAS_TESTMODE ? "VRSCTEST" : "VRSC", settings, settingsmulti))
+            {
+                auto user = settingsmulti.find("-rpcuser");
+                auto pwd = settingsmulti.find("-rpcpassword");
+                auto host = settingsmulti.find("-rpchost");
+                auto port = settingsmulti.find("-rpcport");
+                auto multiEnd = settingsmulti.end();
+                PBAAS_USERPASS = (user == multiEnd ? "" : user->second[0]) + ":" + ((pwd == multiEnd) ? "" : pwd->second[0]);
+                PBAAS_PORT = port == multiEnd ? 0 : atoi(port->second[0]);
+                PBAAS_HOST = host == multiEnd ? "" : host->second[0];
+                if (!PBAAS_HOST.size())
+                {
+                    PBAAS_HOST = "127.0.0.1";
+                }
+            }
+        }
     }
 
     VERUS_CHAINNAME = PBAAS_TESTMODE ? "VRSCTEST" : "VRSC";
     VERUS_CHAINID = CCrossChainRPCData::GetID(VERUS_CHAINNAME);
+    memset(ASSETCHAINS_SYMBOL, 0, sizeof(ASSETCHAINS_SYMBOL));
+    strcpy(ASSETCHAINS_SYMBOL, name.c_str());
 
-    /*
     KOMODO_STOPAT = GetArg("-stopat",0);
+    /*
     ASSETCHAINS_CC = GetArg("-ac_cc",1);
     KOMODO_CCACTIVATE = GetArg("-ac_ccactivate",0);
     ASSETCHAINS_PUBLIC = GetArg("-ac_public",0);
     ASSETCHAINS_PRIVATE = GetArg("-ac_private",0);
     */
-    KOMODO_STOPAT = 0;
     ASSETCHAINS_CC = 1;
     KOMODO_CCACTIVATE = 0;
     ASSETCHAINS_PUBLIC = 0;
@@ -2058,10 +2094,6 @@ void komodo_args(char *argv0)
             }
         }
 
-        addn = GetArg("-seednode","");
-        if ( strlen(addn.c_str()) > 0 )
-            ASSETCHAINS_SEED = 1;
-
         memset(ASSETCHAINS_SYMBOL, 0, sizeof(ASSETCHAINS_SYMBOL));
         strcpy(ASSETCHAINS_SYMBOL, name.c_str());
 
@@ -2088,13 +2120,13 @@ void komodo_args(char *argv0)
         {
             int32_t komodo_baseid(char *origbase);
             extern int COINBASE_MATURITY;
-            if ( (port= komodo_userpass(ASSETCHAINS_USERPASS, ASSETCHAINS_SYMBOL)) != 0 )
+            if ( (port = komodo_userpass(ASSETCHAINS_USERPASS, ASSETCHAINS_SYMBOL)) != 0 )
             {
                 ASSETCHAINS_RPCPORT = port;
             }
             else 
             {
-                komodo_configfile(ASSETCHAINS_SYMBOL,ASSETCHAINS_P2PPORT + 1);
+                komodo_configfile(ASSETCHAINS_SYMBOL, ASSETCHAINS_P2PPORT + 1);
                 komodo_userpass(ASSETCHAINS_USERPASS, ASSETCHAINS_SYMBOL);      // make sure we set user and password on first load
             }
 
@@ -2152,15 +2184,17 @@ void komodo_args(char *argv0)
             }
             obj.push_back(Pair("eras", eras));
 
-            /* We need to store node information here
-            UniValue nodes(UniValue::VARR);
+            std::vector<std::string> addn;
+            UniValue nodeArr(UniValue::VARR);
+            std::map<std::string, std::vector<std::string>>::iterator seedIt = mapMultiArgs.find("-seednode");
+            if (seedIt != mapMultiArgs.end())
             {
-                UniValue node(UniValue::VOBJ);
-                node.push_back(Pair("networkaddress", ));
-                node.push_back(Pair("paymentaddress", ));
+                for (auto oneSeedStr : seedIt->second)
+                {
+                    nodeArr.push_back(CNodeData(oneSeedStr, "").ToUniValue());
+                }
+                obj.pushKV("nodes", nodeArr);
             }
-            obj.push_back(Pair("nodes", nodes));
-            */
 
             // we do not have pre-allocation data here, so fake one lump sum of pre-allocation to a NULL address
             // this will get replaced from either block 1 of our chain, or a connection to VRSC
@@ -2170,7 +2204,7 @@ void komodo_args(char *argv0)
                 UniValue preallocObj(UniValue::VOBJ);
                 preallocObj.push_back(Pair("DestinationPending", ValueFromAmount((CAmount)ASSETCHAINS_SUPPLY)));
                 preallocArr.push_back(preallocObj);
-                obj.push_back(Pair("preallocation", preallocArr));
+                obj.push_back(Pair("preallocations", preallocArr));
             }
             SetThisChain(obj);
             paramsLoaded = true;

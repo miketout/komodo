@@ -21,6 +21,8 @@
 #define KOMODO_ENDOFERA 7777777
 #define KOMODO_INTEREST ((uint64_t)5000000) //((uint64_t)(0.05 * COIN))   // 5%
 extern int64_t MAX_MONEY;
+extern int64_t MAX_SUPPLY;
+
 extern uint8_t NOTARY_PUBKEY33[];
 
 #ifdef notanymore

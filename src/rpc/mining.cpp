@@ -241,7 +241,7 @@ UniValue generate(const UniValue& params, bool fHelp)
         lastTime = GetTime();
 
 #ifdef ENABLE_WALLET
-        std::unique_ptr<CBlockTemplate> pblocktemplate(CreateNewBlockWithKey(reservekey, nHeight, KOMODO_MAXGPUCOUNT));
+        std::unique_ptr<CBlockTemplate> pblocktemplate(CreateNewBlockWithKey(reservekey, nHeight));
 #else
         std::unique_ptr<CBlockTemplate> pblocktemplate(CreateNewBlockWithKey());
 #endif
@@ -524,16 +524,16 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
     obj.push_back(Pair("staking",          VERUS_MINTBLOCKS));
 
     auto chains = ConnectedChains.GetMergeMinedChains();
-    bool mergeMining = mining && ((!IsVerusActive() && ConnectedChains.IsVerusPBaaSAvailable()) || (IsVerusActive() && chains.size()));
+    bool mergeMining = mining && (!IsVerusActive() || (IsVerusActive() && chains.size()));
     int numChains = mergeMining ? (IsVerusActive() ? chains.size() + 1 : 1) : 0;
     obj.push_back(Pair("numthreads",       (int64_t)KOMODO_MININGTHREADS));
     obj.push_back(Pair("mergemining",      numChains));
-    if (chains.size() || numChains)
+    if (numChains)
     {
         UniValue chainNames(UniValue::VARR);
         for (auto chain : chains)
         {
-            chainNames.push_back(chain.name);
+            chainNames.push_back(EncodeDestination(CIdentityID(chain.GetID())) + " (" + chain.name + ")");
         }
         obj.push_back(Pair("mergeminedchains", chainNames));
     }
@@ -605,9 +605,14 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
             "\nArguments:\n"
             "1. \"jsonrequestobject\"       (string, optional) A json object in the following spec\n"
             "     {\n"
-            "       \"mode\":\"template\"    (string, optional) This must be set to \"template\" or omitted\n"
-            "       \"capabilities\":[       (array, optional) A list of strings\n"
-            "           \"support\"           (string) client side supported feature, 'longpoll', 'coinbasetxn', 'coinbasevalue', 'proposal', 'serverlist', 'workid'\n"
+            "       \"mode\":\"template\"   (string, optional) This must be set to \"template\" or omitted\n"
+            "       \"rewarddistribution\":{\n"
+            "           \"(recipientaddress)\":n,  (addressorid, relativeweight) key value to determine distribution\n"
+            "           \"(recipientaddress)\":n,\n"
+            "           \"...\n"
+            "       \"}\n"
+            "       \"capabilities\":[      (array, optional) A list of strings\n"
+            "           \"support\"         (string) client side supported feature, 'longpoll', 'coinbasetxn', 'coinbasevalue', 'proposal', 'serverlist', 'workid'\n"
             "           ,...\n"
             "         ]\n"
             "     }\n"
@@ -679,6 +684,7 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
     {
         const UniValue& oparam = params[0].get_obj();
         const UniValue& modeval = find_value(oparam, "mode");
+
         if (modeval.isStr())
             strMode = modeval.get_str();
         else if (modeval.isNull())
@@ -808,12 +814,46 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
             delete pblocktemplate;
             pblocktemplate = NULL;
         }
+        
+        UniValue recipientWeights;
+        if (params.size() > 0 &&
+            (recipientWeights = find_value(params[0], "recipientdistribution")).isArray() &&
+            recipientWeights.size() &&
+            recipientWeights[0].isObject())
+        {
+            std::vector<CTxOut> minerOutputs;
+            for (int i = 0; i < recipientWeights.size(); i++)
+            {
+                if (!recipientWeights[i].isObject())
+                {
+                    throw JSONRPCError(RPC_INVALID_PARAMS, "recipientdistribution must be an array of objects, each specifing a valid address as key and relative weight value");
+                }
+                std::vector<std::string> keys = recipientWeights[i].getKeys();
+                std::vector<UniValue> values = recipientWeights[i].getValues();
+                if (keys.size() != 1 || values.size() != 1)
+                {
+                    throw JSONRPCError(RPC_INVALID_PARAMS, "Each object in recipientdistribution array must have one valid address as key and one relative weight value");
+                }
+                CTxDestination oneDest = DecodeDestination(keys[0]);
+                CAmount relVal = 0;
+                if (oneDest.which() == COptCCParams::ADDRTYPE_INVALID ||
+                    !(relVal = uni_get_int64(values[0])))
+                {
+                    throw JSONRPCError(RPC_INVALID_PARAMS, "Invalid destination or zero weight specified in recipientdistribution array");
+                }
+                minerOutputs.push_back(CTxOut(relVal, GetScriptForDestination(oneDest)));
+            }
+            pblocktemplate = CreateNewBlock(Params(), minerOutputs, false);
+        }
+        else
+        {
 #ifdef ENABLE_WALLET
-        CReserveKey reservekey(pwalletMain);
-        pblocktemplate = CreateNewBlockWithKey(reservekey,chainActive.LastTip()->GetHeight()+1,KOMODO_MAXGPUCOUNT);
+            CReserveKey reservekey(pwalletMain);
+            pblocktemplate = CreateNewBlockWithKey(reservekey, chainActive.LastTip()->GetHeight()+1);
 #else
-        pblocktemplate = CreateNewBlockWithKey();
+            pblocktemplate = CreateNewBlockWithKey();
 #endif
+        }
 
         /* keep Zcash script-based approach for reference
         boost::shared_ptr<CReserveScript> coinbaseScript;
