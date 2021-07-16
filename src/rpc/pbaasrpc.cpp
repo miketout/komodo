@@ -1702,6 +1702,7 @@ UniValue getexports(const UniValue& params, bool fHelp)
 UniValue submitimports(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
+    
     {
         throw runtime_error(
             "submitimports '{\"sourcesystemid\":\"systemid\", \"notarizationtxid\":\"txid\", \"notarizationtxoutnum\":n,\n"
@@ -1938,6 +1939,80 @@ UniValue getlastimportfrom(const UniValue& params, bool fHelp)
 
 UniValue getimports(const UniValue& params, bool fHelp)
 {
+   ///START of test code for bridge tests 
+   /*
+    UniValue obj(UniValue::VOBJ);  //UniValue obj2(UniValue::VOBJ);
+
+    std::string partialtransactionproof; partialtransactionproof = uni_get_str(params[0]); 
+    std::string txid; txid = uni_get_str(params[1]); 
+    UniValue transferArrUni(UniValue::VOBJ);
+
+    obj.push_back(Pair("partialtransactionproof", partialtransactionproof));
+
+    transferArrUni.push_back(Pair("flags", 67));
+    transferArrUni.push_back(Pair("feecurrencyid", std::string("iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq")));
+    transferArrUni.push_back(Pair("fees", 0));
+    transferArrUni.push_back(Pair("convert", true));
+    transferArrUni.push_back(Pair("crosssystem", true));
+    transferArrUni.push_back(Pair("destinationcurrencyid", std::string("iCYuZAZzUkK93VRUyZn7LbrJXKafEZxTfC")));
+    //transferArrUni.push_back(Pair("via", std::string("iPDTKACAs32Rqxiwbo9hPPpQ5ztuzpMCPy")));
+    transferArrUni.push_back(Pair("exportto", std::string("iCYuZAZzUkK93VRUyZn7LbrJXKafEZxTfC")));
+    UniValue temp(UniValue::VOBJ);
+    temp.push_back(Pair("type", 2));
+    temp.push_back(Pair("address", std::string("RB8QaaKJkLHQghXdkBSuwF5qJXppuP1bm9")));
+    transferArrUni.push_back(Pair("destination", temp));
+    UniValue temp2(UniValue::VOBJ);
+    temp2.push_back(Pair("iJhCezBExJHvtyH3fGhNnt2NhU4Ztkf2yq", 1));
+    transferArrUni.push_back(Pair("currencyvalues", temp2));
+
+
+    if (transferArrUni.empty())
+    {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid export from " + uni_get_str(params[2]));
+    }
+
+
+    CPartialTransactionProof txProof = CPartialTransactionProof(find_value(obj, "partialtransactionproof"));
+
+    uint256 blkHash;
+    CTransaction exportTx;
+
+    
+    uint256 exportTxId = uint256S(uni_get_str(find_value(obj, "txid")));
+
+    
+    uint256 proofRootIt ;
+
+     if (!(txProof.IsValid() &&
+            proofRootIt == txProof.CheckPartialTransaction(exportTx) &&
+            !txProof.GetPartialTransaction(exportTx).IsNull() &&
+            exportTxId == txProof.TransactionHash() &&
+            //proofRootIt != lastConfirmed.proofRoots.end() &&
+            exportTx.vout.size() > 0))
+        {
+          //  throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid proof " );
+        }
+
+        std::pair<std::pair<CInputDescriptor, CPartialTransactionProof>, std::vector<CReserveTransfer>> oneExport =
+            std::make_pair(std::make_pair(CInputDescriptor(exportTx.vout[0].scriptPubKey, 
+                                            exportTx.vout[0].nValue, 
+                                            CTxIn(exportTxId, 0)),
+                                            txProof),
+                            std::vector<CReserveTransfer>());
+
+
+            oneExport.second.push_back(CReserveTransfer(transferArrUni));
+            if (!oneExport.second.back().IsValid())
+            {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid reserve transfers from export of " + uni_get_str(params[0]));
+            }
+
+
+    
+  //  test.testProof();
+  //  printf("%s: TestPATRICIAtree decode\n", __func__);
+////*******************************************************END OF TEST CODE
+*/
     if (fHelp || params.size() != 1)
     {
         throw runtime_error(

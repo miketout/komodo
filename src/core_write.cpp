@@ -1194,6 +1194,19 @@ UniValue CMMRProof::ToUniValue() const
                 retObj.push_back(Pair("hashes", branchArray));
                 break;
             }
+            case CMerkleBranchBase::BRANCH_ETH:
+            {
+                CETHPATRICIABranch &branch = *(CETHPATRICIABranch *)(proof);
+                retObj.push_back(Pair("branchtype", (int)CMerkleBranchBase::BRANCH_ETH));
+               // retObj.push_back(Pair("index", (int64_t)(branch.nIndex)));
+               // retObj.push_back(Pair("mmvsize", (int64_t)(branch.nSize)));
+              //  for (auto &oneHash : branch.branch)
+              //  {
+              //      branchArray.push_back(oneHash.GetHex());
+               // }
+              //  retObj.push_back(Pair("hashes", branchArray));
+               // break;
+            }
         };
     }
     return retObj;

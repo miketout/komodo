@@ -909,7 +909,8 @@ public:
         TX_SIGNATURE = 3,
         TX_OUTPUT = 4,
         TX_SHIELDEDSPEND = 5,
-        TX_SHIELDEDOUTPUT = 6
+        TX_SHIELDEDOUTPUT = 6,
+        TX_ETH_OBJECT = 7
     };
 
     uint256 txHash;
@@ -1237,7 +1238,7 @@ public:
     };
     int8_t version;                                     // to enable versioning of this type of proof
     int8_t type;                                        // this may represent transactions from different systems
-    CMMRProof txProof;                                  // proof of the transaction in its block, either normal Merkle pre-PBaaS, or MMR partial post
+    CMMRProof txProof;                                  // proof of the transaction in its block, either normal Merkle pre-PBaaS,MMR partial post, or PATRICIA Trie
     std::vector<CTransactionComponentProof> components; // each component (or TX for older blocks) to prove
 
     CPartialTransactionProof() : version(VERSION_CURRENT), type(TYPE_PBAAS) {}
@@ -1290,6 +1291,7 @@ public:
         {
             CTransaction outTx;
             CTransactionHeader txh;
+            CCrossChainImport cctx;
             if (components[0].elType == CTransactionHeader::TX_HEADER && components[0].Rehydrate(txh))
             {
                 return txh.txHash;
@@ -1297,6 +1299,10 @@ public:
             else if (components[0].elType == CTransactionHeader::TX_FULL && components[0].Rehydrate(outTx))
             {
                 return outTx.GetHash();
+            }
+            else if (components[0].elType == CTransactionHeader::TX_ETH_OBJECT && components[0].Rehydrate(cctx))
+            {
+                return SerializeHash(cctx);
             }
         }
         return uint256();
